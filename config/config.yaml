@@ -1,0 +1,92 @@
+# 课堂自动笔记系统 —— 主配置
+# 规则：
+#   1. 任何 API key 都不许写在这里，只能放 .env（写了会被 config 加载器直接拒绝）
+#   2. 路径可用相对路径（相对项目根目录）或绝对路径
+#   3. ${ENV_VAR} 会被环境变量替换
+
+paths:
+  incoming_audio: data/incoming/audio
+  incoming_images: data/incoming/images     # Phase 3 才会用
+  session_dir: data/sessions
+  processed_dir: data/processed
+  cache_dir: data/cache
+  log_dir: logs
+  database: data/lecture_ai.db
+  obsidian_vault: ""                        # Phase 4 才需要，例如 D:/Obsidian/MyVault
+
+# ---------------------------------------------------------------- 转录
+transcription:
+  provider: local_whisper                   # local_whisper | openai | fake
+
+  local_whisper:
+    # 本机为 Intel Core Ultra 5 225H + Arc 130T（无 CUDA），故走 CPU int8。
+    # large-v3 在 CPU 上过慢（90min 录音需 2.5h+），改用 turbo 版本。
+    # 若以后换成 NVIDIA 机器：model: large-v3 / device: cuda / compute_type: float16
+    model: large-v3-turbo
+    device: cpu                             # cpu | cuda | auto
+    compute_type: int8                      # int8 | int8_float16 | float16 | float32
+    cpu_threads: 0                          # 0 = 自动（取物理核心数）
+    beam_size: 5
+    vad_filter: true                        # 过滤长静音，显著提速
+    language: zh                            # null = 自动检测；中文课堂建议锁定 zh
+    condition_on_previous_text: false       # 防长音频复读
+
+  openai:
+    model: whisper-1
+    # api_key 只从环境变量 OPENAI_API_KEY 读取
+
+# ---------------------------------------------------------------- 音频
+audio:
+  ffmpeg_path: ""                           # 留空则自动探测 PATH，再退回 imageio-ffmpeg
+  ffprobe_path: ""
+  target_sample_rate: 16000
+  target_channels: 1
+  normalize: false                          # ffmpeg loudnorm，慢，默认关闭
+  extensions: [".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg", ".opus"]
+  chunking:
+    enabled: false                          # 默认不切片，faster-whisper 自身可流式处理
+    chunk_minutes: 30
+    overlap_seconds: 5
+    auto_threshold_minutes: 180             # 超过该时长自动启用切片
+
+# ---------------------------------------------------------------- 处理流程
+processing:
+  auto_process: true                        # watch 发现文件后是否立即处理
+  poll_interval: 15                         # watch 轮询间隔（秒）
+  stable_checks: 2                          # 连续几次采样大小/时间不变才算写入完成
+  quiet_seconds: 10                         # 距最后修改至少多少秒
+  keep_incoming: false                      # true = 复制而非移动（原文件留在 incoming）
+  min_audio_seconds: 60                     # 短于此时长的音频不建 session（防误触录音）
+
+# ---------------------------------------------------------------- 课程
+course:
+  match_tolerance_minutes: 30               # 录音起始时间与课表的容差
+  default_course_key: unknown
+
+# ---------------------------------------------------------------- Phase 2 预留
+llm:
+  provider: anthropic
+  model: claude-sonnet-5
+  max_tokens: 8000
+  temperature: 0.2
+
+vision:
+  provider: anthropic
+  model: claude-sonnet-5
+
+obsidian:
+  create_concepts: true
+  concept_threshold: 0.8
+
+# ---------------------------------------------------------------- 隐私（硬闸门）
+privacy:
+  allow_cloud_audio: false                  # false 时禁止把音频发往云端 ASR
+  allow_cloud_images: true
+  allow_cloud_transcript: true
+
+# ---------------------------------------------------------------- 日志
+logging:
+  level: INFO                               # DEBUG | INFO | WARNING | ERROR
+  console_level: INFO
+  max_bytes: 10485760                       # 10MB
+  backup_count: 5

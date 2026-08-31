@@ -1,0 +1,329 @@
+"""配置加载：config/config.yaml + .env -> 类型化配置对象。
+
+设计要点：
+  1. 单一入口 load_config()，其他模块不许自己读 yaml；
+  2. 路径全部解析成绝对 Path（相对路径以项目根为基准）；
+  3. ${ENV_VAR} 插值；
+  4. API key 只从环境变量读 —— yaml 里出现疑似密钥直接报错，防止误提交；
+  5. 字段缺失一律走默认值，不因为配置不全而崩溃。
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from lecture_ai.errors import ConfigError
+
+_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+# yaml 里出现这些键名即视为密钥泄漏风险
+_SECRET_KEYS = {"api_key", "apikey", "secret", "token", "password", "access_key"}
+
+
+# --------------------------------------------------------------------------- 子配置
+
+
+@dataclass
+class PathsConfig:
+    project_root: Path
+    incoming_audio: Path
+    incoming_images: Path
+    session_dir: Path
+    processed_dir: Path
+    cache_dir: Path
+    log_dir: Path
+    database: Path
+    obsidian_vault: Path | None = None
+
+
+@dataclass
+class LocalWhisperConfig:
+    model: str = "large-v3-turbo"
+    device: str = "cpu"
+    compute_type: str = "int8"
+    cpu_threads: int = 0
+    beam_size: int = 5
+    vad_filter: bool = True
+    language: str | None = "zh"
+    condition_on_previous_text: bool = False
+
+
+@dataclass
+class OpenAIASRConfig:
+    model: str = "whisper-1"
+
+
+@dataclass
+class TranscriptionConfig:
+    provider: str = "local_whisper"
+    local_whisper: LocalWhisperConfig = field(default_factory=LocalWhisperConfig)
+    openai: OpenAIASRConfig = field(default_factory=OpenAIASRConfig)
+
+
+@dataclass
+class ChunkingConfig:
+    enabled: bool = False
+    chunk_minutes: int = 30
+    overlap_seconds: int = 5
+    auto_threshold_minutes: int = 180
+
+
+@dataclass
+class AudioConfig:
+    ffmpeg_path: str = ""
+    ffprobe_path: str = ""
+    target_sample_rate: int = 16000
+    target_channels: int = 1
+    normalize: bool = False
+    extensions: tuple[str, ...] = (".mp3", ".m4a", ".wav", ".flac", ".aac", ".ogg", ".opus")
+    chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+
+
+@dataclass
+class ProcessingConfig:
+    auto_process: bool = True
+    poll_interval: int = 15
+    stable_checks: int = 2
+    quiet_seconds: int = 10
+    keep_incoming: bool = False
+    min_audio_seconds: int = 60
+
+
+@dataclass
+class CourseMatchConfig:
+    match_tolerance_minutes: int = 30
+    default_course_key: str = "unknown"
+
+
+@dataclass
+class LLMConfig:
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-5"
+    max_tokens: int = 8000
+    temperature: float = 0.2
+
+
+@dataclass
+class VisionConfig:
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-5"
+
+
+@dataclass
+class ObsidianConfig:
+    create_concepts: bool = True
+    concept_threshold: float = 0.8
+
+
+@dataclass
+class PrivacyConfig:
+    """隐私开关是硬闸门，不是建议 —— 见 transcription/registry.py。"""
+
+    allow_cloud_audio: bool = False
+    allow_cloud_images: bool = True
+    allow_cloud_transcript: bool = True
+
+
+@dataclass
+class LoggingConfig:
+    level: str = "INFO"
+    console_level: str = "INFO"
+    max_bytes: int = 10 * 1024 * 1024
+    backup_count: int = 5
+
+
+@dataclass
+class Config:
+    paths: PathsConfig
+    transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    course: CourseMatchConfig = field(default_factory=CourseMatchConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
+    obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
+    privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    config_path: Path | None = None
+
+    @property
+    def courses_path(self) -> Path:
+        """courses.yaml 与 config.yaml 同目录。"""
+        base = self.config_path.parent if self.config_path else self.paths.project_root / "config"
+        return base / "courses.yaml"
+
+    @property
+    def glossary_dir(self) -> Path:
+        base = self.config_path.parent if self.config_path else self.paths.project_root / "config"
+        return base / "glossary"
+
+    def ensure_dirs(self) -> None:
+        """创建所有工作目录。幂等。"""
+        for p in (
+            self.paths.incoming_audio,
+            self.paths.incoming_images,
+            self.paths.session_dir,
+            self.paths.processed_dir,
+            self.paths.cache_dir,
+            self.paths.log_dir,
+            self.paths.database.parent,
+        ):
+            p.mkdir(parents=True, exist_ok=True)
+
+
+# --------------------------------------------------------------------------- 加载
+
+
+def find_project_root(start: Path | None = None) -> Path:
+    """向上查找含 pyproject.toml 或 config/config.yaml 的目录。"""
+    current = (start or Path.cwd()).resolve()
+    for candidate in [current, *current.parents]:
+        if (candidate / "pyproject.toml").exists() or (candidate / "config" / "config.yaml").exists():
+            return candidate
+    # 找不到就退回包所在位置的上两级（src/lecture_ai -> src -> root）
+    return Path(__file__).resolve().parents[2]
+
+
+def _interpolate(value: Any) -> Any:
+    """递归展开 ${ENV_VAR}。未定义的变量替换为空串，不抛错。"""
+    if isinstance(value, str):
+        return _ENV_PATTERN.sub(lambda m: os.environ.get(m.group(1), ""), value)
+    if isinstance(value, dict):
+        return {k: _interpolate(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_interpolate(v) for v in value]
+    return value
+
+
+def _assert_no_secrets(data: Any, path: str = "") -> None:
+    """扫描 yaml，发现疑似密钥就报错。
+
+    只在「键名像密钥 且 值非空」时报错 —— 允许写 `api_key: ""` 之类的占位注释。
+    """
+    if isinstance(data, dict):
+        for k, v in data.items():
+            here = f"{path}.{k}" if path else str(k)
+            if str(k).lower() in _SECRET_KEYS and isinstance(v, str) and v.strip():
+                raise ConfigError(
+                    f"config.yaml 的 `{here}` 含有非空密钥值。"
+                    "API key 必须放在 .env 中，绝不能写进配置文件。"
+                )
+            _assert_no_secrets(v, here)
+    elif isinstance(data, list):
+        for i, v in enumerate(data):
+            _assert_no_secrets(v, f"{path}[{i}]")
+
+
+def _resolve_path(value: str, root: Path) -> Path:
+    p = Path(value).expanduser()
+    return p if p.is_absolute() else (root / p)
+
+
+def _sub(data: dict, key: str) -> dict:
+    """取子字典，缺失或类型不对时返回空字典。"""
+    v = data.get(key)
+    return v if isinstance(v, dict) else {}
+
+
+def _dc(cls, data: dict, **overrides):
+    """用字典里存在的字段构造 dataclass，未知字段忽略，缺失字段用默认值。"""
+    valid = {f.name for f in cls.__dataclass_fields__.values()}
+    kwargs = {k: v for k, v in data.items() if k in valid}
+    kwargs.update(overrides)
+    return cls(**kwargs)
+
+
+def load_config(config_path: Path | None = None, project_root: Path | None = None) -> Config:
+    """加载配置。config_path 为空时使用 <project_root>/config/config.yaml。"""
+    root = (project_root or find_project_root()).resolve()
+    cfg_path = Path(config_path).resolve() if config_path else root / "config" / "config.yaml"
+
+    _load_dotenv(root)
+
+    raw: dict = {}
+    if cfg_path.exists():
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"config.yaml 解析失败：{exc}") from exc
+        if not isinstance(raw, dict):
+            raise ConfigError(f"config.yaml 顶层必须是映射，实际是 {type(raw).__name__}")
+
+    _assert_no_secrets(raw)
+    raw = _interpolate(raw)
+
+    p = _sub(raw, "paths")
+    vault_raw = str(p.get("obsidian_vault") or "").strip()
+    paths = PathsConfig(
+        project_root=root,
+        incoming_audio=_resolve_path(p.get("incoming_audio", "data/incoming/audio"), root),
+        incoming_images=_resolve_path(p.get("incoming_images", "data/incoming/images"), root),
+        session_dir=_resolve_path(p.get("session_dir", "data/sessions"), root),
+        processed_dir=_resolve_path(p.get("processed_dir", "data/processed"), root),
+        cache_dir=_resolve_path(p.get("cache_dir", "data/cache"), root),
+        log_dir=_resolve_path(p.get("log_dir", "logs"), root),
+        database=_resolve_path(p.get("database", "data/lecture_ai.db"), root),
+        obsidian_vault=_resolve_path(vault_raw, root) if vault_raw else None,
+    )
+
+    t = _sub(raw, "transcription")
+    transcription = TranscriptionConfig(
+        provider=str(t.get("provider", "local_whisper")),
+        local_whisper=_dc(LocalWhisperConfig, _sub(t, "local_whisper")),
+        openai=_dc(OpenAIASRConfig, _sub(t, "openai")),
+    )
+
+    a = _sub(raw, "audio")
+    exts = a.get("extensions")
+    audio = AudioConfig(
+        ffmpeg_path=str(a.get("ffmpeg_path", "") or ""),
+        ffprobe_path=str(a.get("ffprobe_path", "") or ""),
+        target_sample_rate=int(a.get("target_sample_rate", 16000)),
+        target_channels=int(a.get("target_channels", 1)),
+        normalize=bool(a.get("normalize", False)),
+        extensions=tuple(str(e).lower() for e in exts) if isinstance(exts, list) and exts
+        else AudioConfig.extensions,
+        chunking=_dc(ChunkingConfig, _sub(a, "chunking")),
+    )
+
+    cfg = Config(
+        paths=paths,
+        transcription=transcription,
+        audio=audio,
+        processing=_dc(ProcessingConfig, _sub(raw, "processing")),
+        course=_dc(CourseMatchConfig, _sub(raw, "course")),
+        llm=_dc(LLMConfig, _sub(raw, "llm")),
+        vision=_dc(VisionConfig, _sub(raw, "vision")),
+        obsidian=_dc(ObsidianConfig, _sub(raw, "obsidian")),
+        privacy=_dc(PrivacyConfig, _sub(raw, "privacy")),
+        logging=_dc(LoggingConfig, _sub(raw, "logging")),
+        config_path=cfg_path if cfg_path.exists() else None,
+    )
+    return cfg
+
+
+def _load_dotenv(root: Path) -> None:
+    """加载 .env。python-dotenv 缺失时退化为手工解析，不让它成为硬依赖。"""
+    env_file = root / ".env"
+    if not env_file.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(env_file, override=False)
+        return
+    except ImportError:
+        pass
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))

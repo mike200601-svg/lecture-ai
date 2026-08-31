@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lecture-ai"
+version = "0.1.0"
+description = "课堂自动笔记与 Obsidian 知识库系统"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+
+dependencies = [
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# 本地 ASR。单独成组，未安装时其余功能与测试仍可运行。
+asr = [
+    "faster-whisper>=1.1.0",
+]
+# ffmpeg 静态二进制兜底（无管理员权限时可用）
+ffmpeg = [
+    "imageio-ffmpeg>=0.5",
+]
+cloud = [
+    "openai>=1.40",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.3",
+]
+
+[project.scripts]
+lecture-ai = "lecture_ai.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+lecture_ai = ["database/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "slow: 需要真实模型/长音频，默认跳过（用 -m slow 运行）",
+]
+filterwarnings = ["ignore::DeprecationWarning"]

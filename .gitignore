@@ -1,0 +1,30 @@
+# ---- 隐私：课堂录音、板书、转录文本一律不进版本库 ----
+data/**
+!data/**/.gitkeep
+logs/**
+!logs/.gitkeep
+
+# ---- 密钥 ----
+.env
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+
+# ---- 数据库 ----
+*.db
+*.db-wal
+*.db-shm
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
