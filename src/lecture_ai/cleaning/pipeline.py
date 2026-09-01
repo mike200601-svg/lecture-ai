@@ -422,6 +422,7 @@ class CleanPipeline:
 
         last_error: Exception | None = None
         for attempt in range(self.config.clean.max_retries + 1):
+            call_started = time.monotonic()
             try:
                 response = client.complete(
                     prompt,
@@ -440,6 +441,7 @@ class CleanPipeline:
                     "request_id": response.request_id,
                     "usage": response.usage,
                     "retries": attempt,
+                    "elapsed_sec": round(time.monotonic() - call_started, 3),
                     "created_at": to_iso(now_local()),
                     "result": result,
                 }
@@ -541,6 +543,7 @@ class CleanPipeline:
         keys = (
             "stage", "index", "cache_hit", "provider", "model", "request_id",
             "usage", "retries", "plan", "left_chunk", "right_chunk", "segment_ids",
+            "elapsed_sec",
         )
         return {key: record[key] for key in keys if key in record}
 

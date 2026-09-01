@@ -8,11 +8,50 @@
 |---|---|---|
 | Phase 0 | 工程骨架 | ✅ 完成 |
 | Phase 1 | 音频自动转录 MVP | 🟡 真实 95 分钟课堂验收 1/3 完成，待连续两节课验证 |
-| Phase 2 | AI 课堂笔记 | ⬜ 未开始（仅目录与 prompt 骨架） |
+| Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
+| Phase 2A | 忠实 Transcript Cleaning | 🟡 工程完成，等待真实 LLM provider |
+| Phase 2B/C/D | 结构、知识、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
 | Phase 5 | 课程知识库 | ⬜ 未开始 |
 | Phase 6 | 搜索 / AI 问答 | ⬜ 未开始 |
+
+---
+
+## 2026-09-01：Phase 1.5 与 Phase 2A
+
+### Phase 1.5 真实课堂结果
+
+- Gold Session：`2026-09-01_unknown_001`（目录名保留；metadata 课程为数字电子技术基础）。
+- RAW 的 19 个异常 segments 合并为 16 个带 15 秒上下文的 repair windows；全部用项目内
+  faster-whisper medium、CPU/int8、课程专属 glossary 和当前 anti-repetition 参数重转录。
+- 16 attempted / 16 accepted / 0 rejected；原始可疑时长 582.86s，修复后 0s。
+- 单 segment 最大压缩率 29.7333 → 1.7419；全局异常分数 37.0482 → 2.3857。
+- 选择性 ASR 额外用时 715.87s；修复后 1447 segments，时间轴单调、无重叠。
+- RAW SHA-256 前后不变：JSON
+  `cb1ae7872620715c46c2a2e90ed1507afc26505887b1fea19d56a07caea72ab3`；Markdown
+  `3e7188d6ba779b293e2e8ea072f61622efc1bd4ea51e26692846f2639a30bd00`。
+- `transcript_repaired.json/.md` 已生成；每窗保存完整原文/新文、指标、决定、缓存命中与
+  repair fingerprint。不带 `--force` 重跑 0.1s，产物 mtime 不变。
+
+### Phase 2A 工程状态
+
+- 已实现 REPAIRED 优先/RAW fallback、8 分钟分块 + 30 秒 overlap、两阶段边界协调、
+  common + course glossary、严格 JSON Schema、provenance/uncertainty/visual reference 保留。
+- 已实现 provider-neutral `LLMClient`、OpenAI Responses provider、FakeLLM、逐块缓存、
+  指数退避、只重跑失败块、token/elapsed/retry/request id 审计。
+- Gold Session dry-run 为 12 chunks；预计完整运行还需 11 个相邻边界协调调用。
+- 当前环境没有 OpenAI SDK、`.env` 或 `OPENAI_API_KEY`。真实运行已正确停止为：
+  `WAITING FOR REAL LLM PROVIDER`；Session 仍为 `TRANSCRIBED`，没有生成 Fake cleaned 产物。
+- 完整测试：**230 passed**（待本轮最终命令复核）。
+
+### Git
+
+- `9889fb2 add selective transcript repair`
+- `00ca616 add faithful transcript cleaning pipeline`
+
+Phase 2B/C/D **NOT IMPLEMENTED**。设计与测试计划见 `ARCHITECTURE_PHASE2.md`、
+`TODO_PHASE2.md`。
 
 ---
 
@@ -65,7 +104,7 @@
   Android 端仅作为控制客户端。还需用户本人在电脑界面设置永久访问密码，任何脚本和文档
   都不保存该密码。
 
-Phase 2 仍未开始。
+（这是当时的验收记录；当前 Phase 1.5 已完成，Phase 2A 工程实现已完成。）
 
 ---
 

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from lecture_ai.cli import _parse_region
+from lecture_ai.cli import _parse_region, build_parser
 from lecture_ai.repair import (
     RepairPipeline,
     decide_repair,
@@ -188,6 +188,11 @@ def test_repair_pipeline_is_idempotent_and_preserves_raw(config, db):
     assert not forced.reused
     assert transcriber.calls == 2
 
+    config.repair.padding_seconds = 12
+    changed_config = pipeline.run(meta.session_id)
+    assert not changed_config.reused
+    assert transcriber.calls == 3
+
 
 def test_repair_dry_run_writes_nothing(config, db):
     meta, session_dir, _ = _make_transcribed_session(config, db)
@@ -210,3 +215,8 @@ def test_extract_wav_region_has_expected_duration(tmp_path):
 def test_cli_region_parses_seconds_and_clock():
     assert _parse_region("10-20.5") == (10.0, 20.5)
     assert _parse_region("01:02:03-01:03:04.5") == (3723.0, 3784.5)
+    assert _parse_region("11") == 11
+    args = build_parser().parse_args([
+        "repair", "s1", "--dry-run", "--region", "10-20", "--force"
+    ])
+    assert args.dry_run and args.region == (10.0, 20.0) and args.force

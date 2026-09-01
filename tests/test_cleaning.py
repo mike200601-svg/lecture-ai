@@ -211,6 +211,34 @@ def test_clean_retries_transient_failure(config, db):
     assert outcome.chunks[0]["retries"] == 1
 
 
+def test_retry_reuses_successful_chunks_and_only_reruns_failed_chunk(config, db):
+    meta, session_dir = _make_session(config, db)
+    config.llm.provider = "fake"
+    config.llm.model = "fake-clean-v1"
+    config.clean.max_retries = 0
+
+    def fail_on_second_chunk(prompt):
+        if '"id": 9' in prompt:
+            raise RuntimeError("second chunk unavailable")
+        return _faithful_responder(prompt)
+
+    first_client = FakeLLMClient(fail_on_second_chunk)
+    pipeline = CleanPipeline(config, db, client=first_client, sleep=lambda _: None)
+    with pytest.raises(LLMError, match="second chunk unavailable"):
+        pipeline.run(meta.session_id)
+    first_cache = session_dir / "analysis" / "clean_cache" / "chunk_000.json"
+    assert first_cache.exists()
+    first_mtime = first_cache.stat().st_mtime_ns
+
+    recovery_client = FakeLLMClient(_faithful_responder)
+    recovered = CleanPipeline(
+        config, db, client=recovery_client, sleep=lambda _: None
+    ).run(meta.session_id)
+    assert recovered.chunks_processed == 2 and recovered.boundaries_processed == 1
+    assert recovery_client.calls == 2  # chunk 1 + boundary；chunk 0 直接复用
+    assert first_cache.stat().st_mtime_ns == first_mtime
+
+
 def test_clean_invalid_json_fails_without_final_artifact(config, db):
     meta, session_dir = _make_session(config, db)
     config.llm.provider = "fake"

@@ -439,10 +439,18 @@ def _parse_timestamp(value: str) -> float:
         raise argparse.ArgumentTypeError(f"无效时间戳：{value}") from exc
 
 
-def _parse_region(value: str) -> tuple[float, float]:
-    """解析 START-END；时间点可用秒数或 HH:MM:SS。"""
+def _parse_region(value: str) -> int | tuple[float, float]:
+    """解析 region id 或 START-END；时间点可用秒数或 HH:MM:SS。"""
     if "-" not in value:
-        raise argparse.ArgumentTypeError("region 格式应为 START-END")
+        try:
+            region_id = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(
+                "region 应为非负 id 或 START-END"
+            ) from exc
+        if region_id < 0:
+            raise argparse.ArgumentTypeError("region id 不能为负数")
+        return region_id
     start_text, end_text = value.split("-", 1)
     start, end = _parse_timestamp(start_text), _parse_timestamp(end_text)
     if end <= start:
@@ -611,8 +619,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_repair.add_argument("session_id")
     p_repair.add_argument("--dry-run", action="store_true", help="只显示修复计划，不调用 ASR")
     p_repair.add_argument(
-        "--region", type=_parse_region, metavar="START-END",
-        help="只处理指定时间范围（秒或 HH:MM:SS）",
+        "--region", type=_parse_region, metavar="ID|START-END",
+        help="只处理指定 region id 或时间范围（秒或 HH:MM:SS）",
     )
     p_repair.add_argument("--force", action="store_true", help="忽略修复产物缓存后重跑")
     p_repair.set_defaults(func=cmd_repair)

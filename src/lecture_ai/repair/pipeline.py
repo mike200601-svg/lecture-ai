@@ -92,7 +92,7 @@ class RepairPipeline:
         session_id: str,
         *,
         dry_run: bool = False,
-        region: tuple[float, float] | None = None,
+        region: int | tuple[float, float] | None = None,
         force: bool = False,
     ) -> RepairOutcome:
         started = time.monotonic()
@@ -117,19 +117,26 @@ class RepairPipeline:
         )
         if region is not None:
             regions = self._select_region(regions, segments, region, duration)
+        detected_count = sum(len(item.segment_ids) for item in regions)
 
         glossary = self._glossary(meta.course.key)
         fingerprint = self._fingerprint(raw_sha, glossary.terms, region)
         output_json = transcript_dir / REPAIRED_JSON
         output_md = transcript_dir / REPAIRED_MD
+        previous_asr_elapsed = self._previous_asr_elapsed(
+            output_json, fingerprint, raw_sha
+        )
 
         if dry_run:
             return RepairOutcome(
                 session_id=session_id,
-                regions_detected=len(regions),
+                regions_detected=detected_count,
                 dry_run=True,
                 elapsed_sec=time.monotonic() - started,
-                message=f"计划重转录 {len(regions)} 个扩窗区域",
+                message=(
+                    f"检测 {detected_count} 个可疑 segments，"
+                    f"合并为 {len(regions)} 个扩窗区域"
+                ),
                 regions=[item.to_dict() for item in regions],
             )
 
@@ -182,6 +189,23 @@ class RepairPipeline:
                 if cached is not None:
                     record = dict(cached)
                     record["cache_hit"] = True
+                    original = self._segments_in_window(
+                        segments, item.window_start, item.window_end
+                    )
+                    replacements = [
+                        TranscriptSegment.from_dict(value)
+                        for value in record.get("replacement_segments", [])
+                    ]
+                    record.setdefault(
+                        "original_text", " ".join(segment.text for segment in original)
+                    )
+                    record.setdefault(
+                        "repaired_text", " ".join(segment.text for segment in replacements)
+                    )
+                    cache["windows"][key] = record
+                    atomic_write_text(
+                        cache_path, json.dumps(cache, ensure_ascii=False, indent=2)
+                    )
                     history.append(record)
                     continue
 
@@ -210,6 +234,9 @@ class RepairPipeline:
                     "decision": decision.to_dict(),
                     "replacement_segment_count": len(replacement),
                     "replacement_segments": [segment.to_dict() for segment in replacement],
+                    "original_text": " ".join(segment.text for segment in original),
+                    "repaired_text": " ".join(segment.text for segment in replacement),
+                    "asr_elapsed_sec": float(result.extra.get("elapsed_sec") or 0.0),
                     "cache_hit": False,
                 }
                 history.append(record)
@@ -228,6 +255,7 @@ class RepairPipeline:
                 fingerprint=fingerprint,
                 glossary_sources=glossary.sources,
                 elapsed_sec=time.monotonic() - started,
+                previous_asr_elapsed=previous_asr_elapsed,
             )
             atomic_write_text(
                 output_json, json.dumps(result_payload, ensure_ascii=False, indent=2)
@@ -250,7 +278,7 @@ class RepairPipeline:
             )
             return RepairOutcome(
                 session_id=session_id,
-                regions_detected=len(regions),
+                regions_detected=detected_count,
                 regions_processed=len(history),
                 regions_accepted=accepted,
                 output_json=str(output_json),
@@ -314,7 +342,7 @@ class RepairPipeline:
         self,
         raw_sha: dict[str, str],
         glossary_terms: list[str],
-        selected_region: tuple[float, float] | None,
+        selected_region: int | tuple[float, float] | None,
     ) -> str:
         data = {
             "schema_version": REPAIR_SCHEMA_VERSION,
@@ -341,7 +369,36 @@ class RepairPipeline:
         return (
             data.get("repair", {}).get("fingerprint") == fingerprint
             and data.get("source", {}).get("raw_sha256") == raw_sha
+            and isinstance(data.get("source_transcript"), dict)
+            and bool(data.get("repair_model"))
+            and isinstance(data.get("repair_config"), dict)
+            and all(
+                "original_text" in item and "repaired_text" in item
+                for item in data.get("repair_history", [])
+            )
             and isinstance(data.get("segments"), list)
+        )
+
+    @staticmethod
+    def _previous_asr_elapsed(
+        path: Path, fingerprint: str, raw_sha: dict[str, str]
+    ) -> float:
+        if not path.exists():
+            return 0.0
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return 0.0
+        if (
+            data.get("repair", {}).get("fingerprint") != fingerprint
+            or data.get("source", {}).get("raw_sha256") != raw_sha
+        ):
+            return 0.0
+        summary = data.get("repair_summary") or {}
+        return float(
+            summary.get("asr_extra_elapsed_sec")
+            or summary.get("elapsed_sec")
+            or 0.0
         )
 
     @staticmethod
@@ -366,9 +423,18 @@ class RepairPipeline:
         self,
         detected: list[SuspiciousRegion],
         segments: list[TranscriptSegment],
-        requested: tuple[float, float],
+        requested: int | tuple[float, float],
         duration: float,
     ) -> list[SuspiciousRegion]:
+        if isinstance(requested, int):
+            selected = [item for item in detected if item.region_id == requested]
+            if not selected:
+                choices = ", ".join(str(item.region_id) for item in detected) or "无"
+                raise RepairError(
+                    f"--region {requested} 不存在；当前可疑 region ids：{choices}"
+                )
+            selected[0].region_id = requested
+            return selected
         start, end = requested
         if start < 0 or end <= start or start >= duration:
             raise RepairError(f"非法 --region：{start:.3f}-{end:.3f}")
@@ -438,6 +504,7 @@ class RepairPipeline:
         fingerprint: str,
         glossary_sources: list[str],
         elapsed_sec: float,
+        previous_asr_elapsed: float,
     ) -> dict[str, Any]:
         accepted = sum(
             bool(record.get("decision", {}).get("accepted")) for record in history
@@ -445,7 +512,44 @@ class RepairPipeline:
         original = [TranscriptSegment.from_dict(item) for item in payload["segments"]]
         before = measure_segments(original, self.config.repair)
         after = measure_segments(repaired, self.config.repair)
+        remaining = detect_suspicious_regions(
+            repaired,
+            self.config.repair,
+            duration_sec=float(payload.get("duration_sec") or 0.0),
+        )
+        detected_segment_ids = sorted({
+            int(segment_id)
+            for record in history
+            for segment_id in record.get("segment_ids", [])
+        })
+        original_suspicious_duration = sum(
+            max(0.0, original[index].end - original[index].start)
+            for index in detected_segment_ids
+            if 0 <= index < len(original)
+        )
+        remaining_ids = sorted({
+            int(segment_id)
+            for region in remaining
+            for segment_id in region.segment_ids
+        })
+        final_suspicious_duration = sum(
+            max(0.0, repaired[index].end - repaired[index].start)
+            for index in remaining_ids
+            if 0 <= index < len(repaired)
+        )
+        original_max_compression = max(
+            (measure_segments([segment], self.config.repair).compression_ratio for segment in original),
+            default=0.0,
+        )
+        final_max_compression = max(
+            (measure_segments([segment], self.config.repair).compression_ratio for segment in repaired),
+            default=0.0,
+        )
         provider, model = self._provider_model(self._transcriber)
+        measured_asr_elapsed = sum(
+            float(record.get("asr_elapsed_sec") or 0.0) for record in history
+        )
+        asr_extra_elapsed = measured_asr_elapsed or previous_asr_elapsed
         return {
             "schema_version": REPAIR_SCHEMA_VERSION,
             "layer": "REPAIRED",
@@ -464,19 +568,36 @@ class RepairPipeline:
                 "markdown": TRANSCRIPT_MD,
                 "raw_sha256": raw_sha,
             },
+            "source_transcript": {
+                "json": TRANSCRIPT_JSON,
+                "markdown": TRANSCRIPT_MD,
+                "sha256": raw_sha,
+            },
+            "repair_model": model or payload.get("model"),
+            "repair_config": asdict(self.config.repair),
             "repair": {
                 "fingerprint": fingerprint,
                 "config": asdict(self.config.repair),
                 "glossary_sources": glossary_sources,
             },
             "repair_summary": {
-                "regions_detected": len(history),
+                "detected_regions": len(detected_segment_ids),
+                "regions_detected": len(detected_segment_ids),
+                "repair_windows": len(history),
+                "attempted": len(history),
                 "regions_processed": len(history),
+                "accepted": accepted,
                 "regions_accepted": accepted,
+                "rejected": len(history) - accepted,
                 "regions_rejected": len(history) - accepted,
+                "original_suspicious_duration_sec": round(original_suspicious_duration, 3),
+                "final_suspicious_duration_sec": round(final_suspicious_duration, 3),
+                "original_max_compression_ratio": round(original_max_compression, 4),
+                "final_max_compression_ratio": round(final_max_compression, 4),
                 "segments_before": len(original),
                 "segments_after": len(repaired),
                 "elapsed_sec": round(elapsed_sec, 2),
+                "asr_extra_elapsed_sec": round(asr_extra_elapsed, 2),
                 "metrics_before": before.to_dict(),
                 "metrics_after": after.to_dict(),
             },
@@ -579,8 +700,9 @@ def render_repaired_markdown(payload: dict[str, Any]) -> str:
         f"# 选择性修复转录 · {payload.get('course') or payload.get('session_id')}",
         "",
         (
-            f"> 检测 {summary['regions_detected']} 个区域，接受 "
-            f"{summary['regions_accepted']} 个修复，拒绝 {summary['regions_rejected']} 个。"
+            f"> 检测 {summary['regions_detected']} 个可疑 segments，合并为 "
+            f"{summary['repair_windows']} 个窗口；接受 {summary['regions_accepted']} 个修复，"
+            f"拒绝 {summary['regions_rejected']} 个。"
         ),
         "> RAW 转录未被覆盖；每个决定见 JSON 的 repair_history。",
         "",

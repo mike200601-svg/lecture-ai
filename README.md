@@ -2,15 +2,17 @@
 
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
-**当前进度：Phase 1（音频自动转录）与手机自动入站已部署，正在做真实课堂录音验收。**
+**当前进度：Phase 1 真实课堂链路已验收；Phase 1.5 选择性修复已完成；Phase 2A
+清洗基础设施已完成，等待真实 LLM key。**
 
 ```text
-荣耀录音机 → Syncthing-Fork → incoming → 自动建 Session → 转码 → Whisper 转录 → 带时间戳的 transcript
+荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
+                                               → 分块 LLM CLEANED
 ```
 
-Phase 2（AI 笔记整理）、Phase 3（板书融合）、Phase 4（Obsidian 集成）尚未开始，
-模块目录已占位。设计见 [ARCHITECTURE_V1.md](ARCHITECTURE_V1.md)，
-任务拆解见 [TODO_PHASE1.md](TODO_PHASE1.md)，进度见 [STATUS.md](STATUS.md)。
+Phase 2B/C/D 仅完成设计，Phase 3 与 Obsidian 集成尚未开始。Phase 2 数据分层与边界见
+[ARCHITECTURE_PHASE2.md](ARCHITECTURE_PHASE2.md)，任务见
+[TODO_PHASE2.md](TODO_PHASE2.md)，进度见 [STATUS.md](STATUS.md)。
 
 ---
 
@@ -24,6 +26,9 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e ".[dev,asr,ffmpeg]"
+
+# 需要运行 Phase 2A 真实云端清洗时再安装（只传文本，不传音频）
+python -m pip install -e ".[cloud]"
 
 # ffmpeg（二选一）
 winget install Gyan.FFmpeg     # 推荐：功能完整，自带 ffprobe，装完重开终端
@@ -71,12 +76,26 @@ python -m lecture_ai process --all  # 转录所有待处理 session
 python -m lecture_ai status         # 看总览
 python -m lecture_ai status <session_id>   # 看单个 session 详情
 python -m lecture_ai retry <session_id>    # 重试失败的（不会重跑已成功的转录）
+python -m lecture_ai repair <session_id>   # 只重转录复读/幻觉可疑窗口
+python -m lecture_ai repair <session_id> --dry-run
+python -m lecture_ai clean <session_id>    # REPAIRED 优先，缺失时读 RAW
+python -m lecture_ai clean <session_id> --dry-run
 ```
 
 产物在 `data/sessions/<session_id>/transcript/`：
 
 - `transcript_raw.json` —— 带 segment 级时间戳，供 Phase 2/3 使用
 - `transcript_raw.md` —— 人类可读版，`[00:24:12] 文本` 逐行
+- `transcript_repaired.json/.md` —— Phase 1.5 选择性重转录结果与逐窗决策历史
+
+Phase 2A 产物在同一 Session 的 `analysis/`：
+
+- `transcript_clean.json` —— 正式机器输入，保留时间戳、source SHA、chunk 与 uncertainty
+- `transcript_clean.md` —— 人工抽查版
+- `clean_cache/` —— 逐块和边界缓存；某一 API 调用失败不会重跑已成功块
+
+真实清洗需要在 `.env` 写入 `OPENAI_API_KEY=...`。当前没有 key 时命令会明确停止在
+`WAITING FOR REAL LLM PROVIDER`，不会用 FakeLLM 冒充真实产物。
 
 ### 5. 手机自动同步（当前正式方案）
 
@@ -176,6 +195,9 @@ privacy:
 `allow_cloud_audio: false` 时，即使把 provider 配成 `openai` 也会被直接拒绝并说明原因，
 不会「警告一下然后照样上传」。
 
+`allow_cloud_transcript: false` 同样会硬性禁止 Phase 2A 云端文本清洗。Phase 2A 默认只发送
+分块转录文字与术语表；原始音频仍留在本机。
+
 API key 只能写在 `.env`（见 [.env.example](.env.example)）。
 写进 `config.yaml` 会被配置加载器直接报错，防止误提交。
 
@@ -186,6 +208,7 @@ API key 只能写在 `.env`（见 [.env.example](.env.example)）。
 这些在代码里有对应的测试保护：
 
 - **原始录音永不删除、永不覆盖**。同名文件自动加序号，不会顶掉已有文件。
+- **RAW 转录永不覆盖**。下游固定走 RAW → REPAIRED → CLEANED，每层保存 source SHA。
 - **转录结果必须带时间戳**。只存纯文本是不允许的 —— Phase 3 要靠时间轴对齐板书。
 - **retry 绝不重跑已成功的 ASR**。那是最贵的一步，缓存合法就复用。
 - **metadata.json 是真相源**，SQLite 只是索引。库删了可以 `python -m lecture_ai reindex` 重建。
@@ -199,6 +222,7 @@ python -m pytest -q            # 全部测试（不需要 GPU / 模型 / 网络�
 python -m pytest -q -k e2e     # 只跑端到端
 ```
 
-代码结构与分层规则见 [ARCHITECTURE_V1.md](ARCHITECTURE_V1.md) 第 1、2 节。
+Phase 1 结构见 [ARCHITECTURE_V1.md](ARCHITECTURE_V1.md)，Phase 1.5/2 结构见
+[ARCHITECTURE_PHASE2.md](ARCHITECTURE_PHASE2.md)。
 一条硬性约束：**领域层（ingestion / session / audio / transcription / database / utils）
 不得反向 import pipeline 或 cli**，有测试专门盯着这件事。

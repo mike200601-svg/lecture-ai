@@ -16,10 +16,11 @@ RAW -> REPAIRED -> CLEANED -> STRUCTURED -> NOTE
 | RAW | `transcript/transcript_raw.{json,md}` | Phase 1 原始 ASR，证据层，只读 | 已实现、不可覆盖 |
 | REPAIRED | `transcript/transcript_repaired.{json,md}` | 只重转录异常时间窗 | Phase 1.5 实现 |
 | CLEANED | `analysis/transcript_clean.{json,md}` | 忠实纠错、断句、标点与不确定性标记 | Phase 2A 实现 |
-| STRUCTURED | `analysis/transcript_structured.json` | 章节、概念、例题等结构抽取 | Phase 2B，未实现 |
-| NOTE | `notes/lecture_note.md` | 人类可读课堂笔记 | Phase 2C，未实现 |
+| STRUCTURED | `analysis/outline.json` | 课堂结构与时间范围 | Phase 2B，未实现 |
+| KNOWLEDGE | `analysis/knowledge.json`、`analysis/unresolved_visual.json` | 知识项与待板书解析引用 | Phase 2C，未实现 |
+| NOTE | `note/lecture_audio_draft.md` | 仅基于音频的课堂草稿 | Phase 2D，未实现 |
 
-Phase 2D（质量评估与自动验收）也不在本轮实现范围。任何下游步骤都不得回写上游文件。
+任何下游步骤都不得回写上游文件。
 Phase 1.5 每次执行前后都校验 RAW JSON 与 Markdown 的 SHA-256；发生变化立即失败。
 
 ## 2. 顶层状态与处理步骤
@@ -63,7 +64,7 @@ no-speech 概率和时长。单项越界形成原因，时间相邻或扩窗后�
 3. 新文本没有明显退化（极端缩短、no-speech 激增或异常分数反升）。
 
 未满足时保留原窗口并记录拒绝原因。`--force` 只忽略产物缓存，不绕过质量门控；如需
-人工单窗运行，用 `--region START-END` 限定候选范围。
+人工单窗运行，用 `--region ID` 选择 dry-run 中的 region，或用 `START-END` 限定范围。
 
 ### 3.3 合并与产物
 
@@ -121,30 +122,51 @@ JSON 记录逐块来源、缓存命中、重试次数、token usage、边界协�
 ## 5. CLI
 
 ```text
-lecture-ai repair SESSION [--dry-run] [--region START-END] [--force]
+lecture-ai repair SESSION [--dry-run] [--region ID|START-END] [--force]
 lecture-ai clean  SESSION [--dry-run] [--chunk INDEX] [--force]
 ```
 
 所有命令可重复执行。`repair` 默认自动检测全部候选；`clean --chunk` 供诊断单块，但只有
 完整运行才组装最终 cleaned 产物。
 
-## 6. 后续阶段接口（只设计，不实现）
+## 6. 后续阶段接口、Prompt 与测试计划（只设计，不实现）
 
-### Phase 2B：结构化理解
+### Phase 2B：课堂结构识别
 
-输入 CLEANED，输出带时间范围与 source segment ids 的章节、主题、定义、公式、例题、
-考试提示和未决问题。不得直接读取 RAW 绕过 provenance。计划接口：
-`StructurePipeline.run(session_id) -> StructuredTranscript`。
+输入 CLEANED，使用 `prompts/chapter_detection.md`，输出 `analysis/outline.json`。每个结构项
+必须带 `start/end` 和 `source_segment_ids`。计划 schema 包含：`lecture_topics`、`subtopics`、
+`definitions`、`derivations`、`examples`、`teacher_emphasis`、`exam_tips`、`transitions`。
+不得直接读取 RAW 绕过 provenance。计划接口：
+`StructurePipeline.run(session_id) -> LectureOutline`。
 
-### Phase 2C：笔记生成
+测试计划：固定 FakeLLM 响应做 schema/时间范围/source id 校验；故意返回越界时间、未知 id、
+重叠章节和丢失推导，确认质量门拒绝；真实课堂抽查结构边界但不以标题漂亮作为验收依据。
 
-输入 STRUCTURED，输出课堂笔记和可选概念候选；所有结论可追溯到 source segment ids。
-计划接口：`NotePipeline.run(session_id) -> LectureNote`。
+### Phase 2C：结构化知识抽取
 
-### Phase 2D：质量评估
+输入 CLEANED + `outline.json`，使用 `prompts/concept_extraction.md`，输出
+`analysis/knowledge.json` 与 `analysis/unresolved_visual.json`。计划 schema 包含：`concepts`、
+`equations`、`examples`、`teacher_emphasis`、`exam_tips`、`common_errors`、`open_questions`、
+`visual_references`、`uncertain_items`。所有知识项必须引用 source segment ids；音频无法恢复的
+公式或图不得由模型补写，而是进入 unresolved visual 队列。
 
-对 completeness、faithfulness、timestamp coverage、uncertainty preservation 和 citation
-coverage 做自动检查，失败只阻止发布，不修改上游内容。计划接口：
-`QualityGate.evaluate(session_id, artifact) -> QualityReport`。
+计划接口：`KnowledgePipeline.run(session_id) -> (LectureKnowledge, UnresolvedVisuals)`。
+Phase 3 预留接口：`VisualResolver.resolve(reference, images_by_exif_time)`，用 reference 的
+`timestamp/context/reference_type/confidence` 与照片 EXIF 时间对齐，再生成一份新的融合层，
+不得回写 CLEANED/KNOWLEDGE。
+
+测试计划：FakeLLM 覆盖公式缺失、板书引用、同一概念多处来源、不确定项；拒绝无 source id
+的知识、模型凭空补出的公式和未进入 unresolved queue 的视觉依赖。
+
+### Phase 2D：Audio-only Lecture Draft
+
+输入 `outline.json` + `knowledge.json`，使用 `prompts/lecture_note.md`，输出
+`note/lecture_audio_draft.md`。它明确是 audio draft，不是最终笔记；板书、教材和课件尚未融合。
+计划章节：本节框架、核心概念、推导、课堂例子、老师强调、易错点、待板书补充、本节小结。
+每段保留 source ids 或时间链接。
+
+计划接口：`AudioDraftPipeline.run(session_id) -> AudioLectureDraft`。
+测试计划：快照测试 note 结构；检查所有正文块有 provenance；视觉未决项必须呈现为
+`[!question]`，不得伪装成已解决；禁止生成 WikiLinks、Concept Notes 或写入 Obsidian Vault。
 
 以上 Phase 2B / 2C / 2D 均为接口与测试计划，**本轮不实现**。
