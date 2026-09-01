@@ -31,6 +31,10 @@ class TranscriptionError(LectureAIError):
     """ASR 阶段出错。通常可重试。"""
 
 
+class RepairError(LectureAIError):
+    """选择性重转录、合并或 RAW 完整性校验失败。"""
+
+
 class SessionNotFound(LectureAIError):
     """指定的 session 不存在。"""
 

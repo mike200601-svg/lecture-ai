@@ -98,6 +98,20 @@ class ProcessingConfig:
 
 
 @dataclass
+class RepairConfig:
+    """Phase 1.5 选择性重转录。阈值均可由 config.yaml 调整。"""
+
+    padding_seconds: float = 15.0
+    min_text_bytes: int = 60
+    compression_ratio_threshold: float = 2.6
+    unique_char_ratio_threshold: float = 0.16
+    repeated_ngram_ratio_threshold: float = 0.55
+    longest_run_threshold: int = 6
+    min_improvement_ratio: float = 0.20
+    min_length_ratio: float = 0.05
+
+
+@dataclass
 class CourseMatchConfig:
     match_tolerance_minutes: int = 30
     default_course_key: str = "unknown"
@@ -146,6 +160,7 @@ class Config:
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    repair: RepairConfig = field(default_factory=RepairConfig)
     course: CourseMatchConfig = field(default_factory=CourseMatchConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
@@ -300,6 +315,7 @@ def load_config(config_path: Path | None = None, project_root: Path | None = Non
         transcription=transcription,
         audio=audio,
         processing=_dc(ProcessingConfig, _sub(raw, "processing")),
+        repair=_dc(RepairConfig, _sub(raw, "repair")),
         course=_dc(CourseMatchConfig, _sub(raw, "course")),
         llm=_dc(LLMConfig, _sub(raw, "llm")),
         vision=_dc(VisionConfig, _sub(raw, "vision")),

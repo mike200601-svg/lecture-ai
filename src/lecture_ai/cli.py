@@ -399,6 +399,72 @@ def cmd_retry(args: argparse.Namespace) -> int:
     return EXIT_FAILURE
 
 
+def _parse_timestamp(value: str) -> float:
+    """解析秒数或 HH:MM:SS(.sss)。"""
+    value = value.strip()
+    try:
+        if ":" not in value:
+            seconds = float(value)
+        else:
+            parts = value.split(":")
+            if len(parts) == 2:
+                hours = 0.0
+                minutes, seconds_part = parts
+            elif len(parts) == 3:
+                hours, minutes, seconds_part = parts
+                hours = float(hours)
+            else:
+                raise ValueError
+            seconds = hours * 3600 + float(minutes) * 60 + float(seconds_part)
+        if seconds < 0:
+            raise ValueError
+        return seconds
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"无效时间戳：{value}") from exc
+
+
+def _parse_region(value: str) -> tuple[float, float]:
+    """解析 START-END；时间点可用秒数或 HH:MM:SS。"""
+    if "-" not in value:
+        raise argparse.ArgumentTypeError("region 格式应为 START-END")
+    start_text, end_text = value.split("-", 1)
+    start, end = _parse_timestamp(start_text), _parse_timestamp(end_text)
+    if end <= start:
+        raise argparse.ArgumentTypeError("region 结束时间必须晚于开始时间")
+    return start, end
+
+
+def cmd_repair(args: argparse.Namespace) -> int:
+    """选择性重转录可疑 ASR 区域，RAW 永不覆盖。"""
+    from lecture_ai.repair import RepairPipeline
+
+    config = _bootstrap(args)
+    outcome = RepairPipeline(config).run(
+        args.session_id,
+        dry_run=args.dry_run,
+        region=args.region,
+        force=args.force,
+    )
+    if outcome.dry_run:
+        out(f"DRY RUN · {outcome.session_id} · {outcome.message}")
+        for item in outcome.regions:
+            out(
+                f"  region {item['region_id']:02d}  "
+                f"{hhmmss(item['window_start'])}-{hhmmss(item['window_end'])}  "
+                f"segments={item['segment_ids']}  reasons={','.join(item['reasons'])}"
+            )
+        return EXIT_OK
+    marker = "复用" if outcome.reused else "完成"
+    out(
+        f"✔ {outcome.session_id}  修复{marker}：检测 {outcome.regions_detected} 个区域，"
+        f"接受 {outcome.regions_accepted} 个（{outcome.elapsed_sec:.1f} 秒）"
+    )
+    if outcome.output_json:
+        out(f"  JSON  {outcome.output_json}")
+        out(f"  MD    {outcome.output_md}")
+    return EXIT_OK
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """长驻监听 incoming 目录。"""
     from lecture_ai.pipeline import Watcher
@@ -444,6 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  lecture-ai status              查看总览\n"
             "  lecture-ai status <session>    查看单个 session 详情\n"
             "  lecture-ai retry <session>     重试失败的 session\n"
+            "  lecture-ai repair <session>    选择性重转录可疑区域\n"
         ),
     )
     parser.add_argument("--version", action="version", version=f"lecture-ai {__version__}")
@@ -484,6 +551,16 @@ def build_parser() -> argparse.ArgumentParser:
                          choices=["preprocess", "transcribe"],
                          help="强制重跑指定步骤（默认从失败点继续，不重跑 ASR）")
     p_retry.set_defaults(func=cmd_retry)
+
+    p_repair = sub.add_parser("repair", help="选择性重转录可疑 ASR 区域")
+    p_repair.add_argument("session_id")
+    p_repair.add_argument("--dry-run", action="store_true", help="只显示修复计划，不调用 ASR")
+    p_repair.add_argument(
+        "--region", type=_parse_region, metavar="START-END",
+        help="只处理指定时间范围（秒或 HH:MM:SS）",
+    )
+    p_repair.add_argument("--force", action="store_true", help="忽略修复产物缓存后重跑")
+    p_repair.set_defaults(func=cmd_repair)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,

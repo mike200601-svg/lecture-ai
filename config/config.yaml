@@ -60,6 +60,17 @@ processing:
   keep_incoming: true                       # Syncthing 接收目录必须保留源文件，避免移动后被重复下载
   min_audio_seconds: 60                     # 短于此时长的音频不建 session（防误触录音）
 
+# ---------------------------------------------------------------- Phase 1.5 选择性重转录
+repair:
+  padding_seconds: 15                       # 可疑片段两侧扩窗（建议 10–20 秒）
+  min_text_bytes: 60
+  compression_ratio_threshold: 2.6
+  unique_char_ratio_threshold: 0.16
+  repeated_ngram_ratio_threshold: 0.55
+  longest_run_threshold: 6
+  min_improvement_ratio: 0.20              # 新窗口异常分数至少下降 20%
+  min_length_ratio: 0.05                   # 防止用近空结果替换有声内容
+
 # ---------------------------------------------------------------- 课程
 course:
   match_tolerance_minutes: 30               # 录音起始时间与课表的容差

@@ -3,6 +3,7 @@
 from lecture_ai.pipeline.diagnostics import AudioProbeReport, probe_audio_metadata
 from lecture_ai.pipeline.phase1 import Phase1Pipeline, ProcessOutcome
 from lecture_ai.pipeline.watcher import Watcher
+from lecture_ai.repair.pipeline import RepairPipeline
 
 __all__ = [
     "AudioProbeReport",
@@ -10,4 +11,5 @@ __all__ = [
     "Phase1Pipeline",
     "ProcessOutcome",
     "Watcher",
+    "RepairPipeline",
 ]

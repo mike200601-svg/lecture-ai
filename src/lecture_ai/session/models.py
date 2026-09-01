@@ -127,7 +127,9 @@ class AudioInfo:
 METADATA_SCHEMA_VERSION = 1
 
 #: 步骤顺序（Phase 1 只跑前三个，后面的先占位）
-STEP_NAMES = ("ingest", "preprocess", "transcribe", "clean", "note", "obsidian")
+STEP_NAMES = (
+    "ingest", "preprocess", "transcribe", "repair", "clean", "note", "obsidian"
+)
 
 
 @dataclass
