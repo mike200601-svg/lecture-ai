@@ -248,7 +248,11 @@ class Phase1Pipeline:
 
         transcriber = self._get_transcriber()
         course = self.courses.get(meta.course.key)
-        glossary = load_glossary(self.config.glossary_dir, course.glossary)
+        # ASR 只用课程专属词表。真实录音 A/B 证明，跨学科 common
+        # hotwords 会在弱语音段制造高置信幻觉（例如数字电路课出现哈密顿量）。
+        glossary = load_glossary(
+            self.config.glossary_dir, course.glossary, include_common=False
+        )
         lw = self.config.transcription.local_whisper
         options = TranscribeOptions(
             language=lw.language,
@@ -257,6 +261,8 @@ class Phase1Pipeline:
             vad_filter=lw.vad_filter,
             beam_size=lw.beam_size,
             condition_on_previous_text=lw.condition_on_previous_text,
+            repetition_penalty=lw.repetition_penalty,
+            no_repeat_ngram_size=lw.no_repeat_ngram_size,
         )
         if glossary.terms:
             slog.info("已载入 %d 条专业术语用于 ASR 提示", len(glossary))

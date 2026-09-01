@@ -40,6 +40,14 @@ def test_glossary_missing_course_file_is_tolerated(config):
     assert "本征值" in g.terms  # common.txt 仍然生效
 
 
+def test_glossary_can_exclude_common_for_asr(config):
+    g = load_glossary(
+        config.glossary_dir, "quantum_mechanics.txt", include_common=False
+    )
+    assert "薛定谔方程" in g.terms
+    assert "本征值" not in g.terms
+
+
 def test_glossary_missing_dir_returns_empty(tmp_path):
     g = load_glossary(tmp_path / "nope", "x.txt")
     assert len(g) == 0
@@ -220,6 +228,8 @@ def test_transcribe_options_defaults():
     # 长音频必须关掉 condition_on_previous_text，否则 Whisper 会复读
     assert o.condition_on_previous_text is False
     assert o.vad_filter is True
+    assert o.repetition_penalty == 1.1
+    assert o.no_repeat_ngram_size == 3
 
 
 # --------------------------------------------------------------------- 模型缓存

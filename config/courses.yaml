@@ -36,6 +36,17 @@ courses:
         start: "08:00"
         end: "09:40"
 
+  digital_electronics:
+    name: 数字电子技术基础
+    teacher: ""
+    semester: 2026-秋
+    glossary: digital_electronics.txt
+    obsidian_folder: University/数字电子技术基础
+    schedule:
+      - weekday: 2
+        start: "09:45"
+        end: "11:20"
+
   # 兜底课程：匹配不到任何课表时使用，不要删除
   unknown:
     name: 未归类

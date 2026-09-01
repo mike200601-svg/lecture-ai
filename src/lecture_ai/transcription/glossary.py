@@ -40,13 +40,23 @@ class Glossary:
         return "本段录音是理工科课堂讲授，可能出现以下术语：" + "、".join(self.terms[:max_terms])
 
 
-def load_glossary(glossary_dir: Path, course_glossary: str | None) -> Glossary:
-    """加载 common.txt + 课程专属词表。文件缺失不报错，只是词表为空。"""
+def load_glossary(
+    glossary_dir: Path,
+    course_glossary: str | None,
+    *,
+    include_common: bool = True,
+) -> Glossary:
+    """加载术语词表。文件缺失不报错，只是词表为空。
+
+    Phase 1 ASR 应设 ``include_common=False``：跨学科通用词会在弱语音段
+    诱发幻觉。Phase 2 文本纠错仍可同时使用 common 与课程词表。
+    """
     terms: list[str] = []
     sources: list[str] = []
     seen: set[str] = set()
 
-    for filename in (COMMON_FILE, course_glossary):
+    filenames = (COMMON_FILE, course_glossary) if include_common else (course_glossary,)
+    for filename in filenames:
         if not filename:
             continue
         path = glossary_dir / filename

@@ -183,13 +183,28 @@ def guess_start_time(
     creation_time: datetime | None = None,
 ) -> StartTimeGuess:
     """推断录音起始时间。按可靠性从高到低尝试。"""
-    # 1) 容器元数据（手机录音机通常会写）
+    parsed = _parse_filename_time(path.name)
+
+    # 部分 Android 录音机（已确认包括荣耀系统录音机）会在文件封口时
+    # 才写 creation_time，此时它表示结束时间而非开始时间。如果文件名时间
+    # 加时长与 creation_time 在 10 分钟内吻合，优先使用文件名的开始时间。
+    # 这个容差覆盖录音暂停、App 延迟封口及秒级取整，同时不会把
+    # 普通的「真实开始时间」误判为结束时间。
     if creation_time is not None:
         dt = creation_time.astimezone() if creation_time.tzinfo else creation_time
+        if parsed is not None and duration_sec:
+            expected_end = parsed + timedelta(seconds=duration_sec)
+            # 文件名不带时区，因此用 creation_time 转换后的本地墙上时间
+            # 比较；返回真实容器时间时仍保留原有时区信息。
+            comparable_dt = dt.replace(tzinfo=None) if dt.tzinfo else dt
+            if (
+                comparable_dt > parsed
+                and abs((comparable_dt - expected_end).total_seconds()) <= 10 * 60
+            ):
+                return StartTimeGuess(parsed, "filename", "high")
         return StartTimeGuess(dt, "ffprobe", "high")
 
     # 2) 文件名里的时间戳
-    parsed = _parse_filename_time(path.name)
     if parsed is not None:
         return StartTimeGuess(parsed, "filename", "high")
 

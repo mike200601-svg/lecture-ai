@@ -52,6 +52,8 @@ class LocalWhisperConfig:
     vad_filter: bool = True
     language: str | None = "zh"
     condition_on_previous_text: bool = False
+    repetition_penalty: float = 1.1
+    no_repeat_ngram_size: int = 3
 
 
 @dataclass

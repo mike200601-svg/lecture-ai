@@ -7,7 +7,7 @@
 | Phase | 内容 | 状态 |
 |---|---|---|
 | Phase 0 | 工程骨架 | ✅ 完成 |
-| Phase 1 | 音频自动转录 MVP | 🟡 代码与手机入站部署完成，**真实课堂录音验收进行中** |
+| Phase 1 | 音频自动转录 MVP | 🟡 真实 95 分钟课堂验收 1/3 完成，待连续两节课验证 |
 | Phase 2 | AI 课堂笔记 | ⬜ 未开始（仅目录与 prompt 骨架） |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
@@ -42,9 +42,18 @@
   才进入管道；测试通过（1 passed in 2.13s），生产代码无需为该测试改动。
 - 发现 `keep_incoming: false` 会形成“watcher 移走文件 → Syncthing 再下载”的循环，
   已改为 `true`。Session 复制原始音频，incoming 保留同步源，SHA-256 数据库负责去重。
-- 真实课堂录音 `Recorder - 20260901-0943.m4a` 已自动到达 incoming。录制尚未结束时，
-  中间快照缺少 M4A 最终 `moov`，probe 会拒绝且不会创建坏 Session；停止录音、文件封口后
-  watcher 会自动重试。这验证了“半文件不转录”的实际保护链路。
+- 真实课堂录音 `Recorder - 20260901-0943.m4a`：140,945,271 bytes，
+  01:34:42，AAC 48 kHz 双声道。录制中间快照缺少 `moov` 时被拒绝；
+  封口后 Syncthing 续传完成，watcher 无人工重试创建 Session 并转录。
+- 本地 medium 产出 1291 段 / 24,744 字，ASR 用时 3,762.89 秒（1.51x 实时），
+  Session 状态为 `TRANSCRIBED`；时间轴单调，原始音频与 Session 副本 SHA-256 一致。
+- 荣耀录音机将封口/结束时间写入 `creation_time`。已增加“容器时间接近
+  文件名起点 + duration 时改用文件名”的规则；本次校正为 09:43 开始。
+- 原始转录有 19 个高重复可疑段（10.26% 时长）。尾段 A/B 将最大文本压缩率
+  从 29.73 降至 1.43；已改为仅用课程专属 hotwords，并启用
+  `repetition_penalty: 1.1` + `no_repeat_ngram_size: 3`。
+- 录音峰值 -4.2 dBFS、无削波，典型语音与安静背景差约 15.46 dB。
+  结论为录音可用，无需购买物理降噪设备，不建议默认强降噪。
 
 ### 运行保障
 
@@ -64,10 +73,11 @@ Phase 2 仍未开始。
 
 - Git 已初始化；`main` 分支基线提交为 `25bac8b phase1 engineering baseline`。
 - 正式环境已迁移到项目根 `.venv`：Python 3.13.14；`pip check` 无依赖冲突。
-- 完整测试为 **206 passed**；不依赖 GPU、网络或真实模型。
+- 完整测试当前为 **208 passed**；不依赖 GPU、网络或真实模型。
 - 已通过 winget 安装 FFmpeg / ffprobe 9.0.1 full build；doctor 优先从 PATH 使用完整版。
 - 新增 `lecture-ai probe <audio>`，只读检查手机录音 metadata 与起始时间推断。
-- 起始时间优先级已统一为：ffprobe creation_time → filename → mtime-duration → ctime。
+- 起始时间优先级为：ffprobe creation_time → filename → mtime-duration → ctime；
+  若 creation_time 与「filename + duration」吻合，则判为封口时间并改用 filename。
 - doctor 现在分别显示 tiny / medium / large-v3-turbo 和配置中的本地目录状态、来源、大小与路径；
   本地模型还会校验核心文件并实际初始化，当前配置模型不可用时明确返回 FAIL。
 - 代理 `127.0.0.1:7897` 已通过 TCP、curl、Python httpx 与 HuggingFace Hub API 验证；

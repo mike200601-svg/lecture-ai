@@ -30,6 +30,8 @@ transcription:
     vad_filter: true                        # 过滤长静音，显著提速
     language: zh                            # null = 自动检测；中文课堂建议锁定 zh
     condition_on_previous_text: false       # 防长音频复读
+    repetition_penalty: 1.1                 # 轻度惩罚重复 token（真实课堂 A/B 验证）
+    no_repeat_ngram_size: 3                 # 禁止 3-gram 无限循环
 
   openai:
     model: whisper-1

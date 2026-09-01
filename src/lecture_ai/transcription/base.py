@@ -82,6 +82,9 @@ class TranscribeOptions:
     temperature: float = 0.0
     #: 长音频必须关掉，否则 Whisper 容易陷入复读
     condition_on_previous_text: bool = False
+    #: 真实课堂弱语音段的复读保护；已用 95 分钟实录做过尾段 A/B。
+    repetition_penalty: float = 1.1
+    no_repeat_ngram_size: int = 3
 
 
 class Transcriber(ABC):

@@ -233,7 +233,7 @@ data/sessions/2026-09-03_quantum-mechanics_001/
 照片时间戳融合依赖 session 的绝对起始时间，因此 Phase 1 就必须把它算准。
 按优先级依次尝试：
 
-1. **容器元数据**：`ffprobe` 读 `format_tags.creation_time`（多数手机录音机会写）；
+1. **容器元数据**：`ffprobe` 读 `format_tags.creation_time`（多数手机录音机会写）。但某些 Android 录音机会把封口/结束时间写入该字段；当它与「文件名时间 + duration」在容差内吻合时，改用文件名时间；
 2. **文件名模式**：`录音_20260903_140000`、`20260903-140000`、`REC_2026-09-03 14.00.00` 等正则；
 3. **mtime − duration**：多数录音 App 在停止时落盘，故 `mtime` ≈ 结束时间；
 4. **ctime 兜底**，并在 metadata 标记 `start_time_confidence: low`。

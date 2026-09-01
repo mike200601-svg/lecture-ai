@@ -129,6 +129,22 @@ def test_creation_time_wins(tmp_path):
     assert guess.confidence == "high"
 
 
+def test_creation_time_near_recording_end_does_not_override_filename(tmp_path):
+    """某些 Android 录音机把封口时间写进 creation_time，文件名才是起点。"""
+    f = tmp_path / "Recorder - 20260901-0943.m4a"
+    f.write_bytes(b"x")
+
+    guess = guess_start_time(
+        f,
+        duration_sec=5682.381,
+        creation_time=datetime(2026, 9, 1, 11, 22, 19),
+    )
+
+    assert guess.dt == datetime(2026, 9, 1, 9, 43)
+    assert guess.source == "filename"
+    assert guess.confidence == "high"
+
+
 def test_start_time_from_mtime_minus_duration(tmp_path):
     """无元数据无文件名时间时：mtime 通常是录音结束时刻。"""
     f = tmp_path / "audio.m4a"

@@ -119,6 +119,8 @@ class FasterWhisperTranscriber(Transcriber):
             "condition_on_previous_text": (
                 opts.condition_on_previous_text and self.condition_on_previous_text
             ),
+            "repetition_penalty": opts.repetition_penalty,
+            "no_repeat_ngram_size": opts.no_repeat_ngram_size,
             "word_timestamps": False,
         }
         if opts.initial_prompt:
