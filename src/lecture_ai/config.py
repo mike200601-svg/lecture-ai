@@ -112,6 +112,18 @@ class RepairConfig:
 
 
 @dataclass
+class CleanConfig:
+    """Phase 2A 忠实清洗的分块、缓存与重试参数。"""
+
+    chunk_minutes: int = 8
+    overlap_seconds: int = 30
+    max_retries: int = 2
+    retry_base_seconds: float = 1.0
+    min_retention_ratio: float = 0.45
+    max_expansion_ratio: float = 1.35
+
+
+@dataclass
 class CourseMatchConfig:
     match_tolerance_minutes: int = 30
     default_course_key: str = "unknown"
@@ -119,8 +131,8 @@ class CourseMatchConfig:
 
 @dataclass
 class LLMConfig:
-    provider: str = "anthropic"
-    model: str = "claude-sonnet-5"
+    provider: str = "openai"
+    model: str = "gpt-5.4-mini"
     max_tokens: int = 8000
     temperature: float = 0.2
 
@@ -161,6 +173,7 @@ class Config:
     audio: AudioConfig = field(default_factory=AudioConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     repair: RepairConfig = field(default_factory=RepairConfig)
+    clean: CleanConfig = field(default_factory=CleanConfig)
     course: CourseMatchConfig = field(default_factory=CourseMatchConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
@@ -316,6 +329,7 @@ def load_config(config_path: Path | None = None, project_root: Path | None = Non
         audio=audio,
         processing=_dc(ProcessingConfig, _sub(raw, "processing")),
         repair=_dc(RepairConfig, _sub(raw, "repair")),
+        clean=_dc(CleanConfig, _sub(raw, "clean")),
         course=_dc(CourseMatchConfig, _sub(raw, "course")),
         llm=_dc(LLMConfig, _sub(raw, "llm")),
         vision=_dc(VisionConfig, _sub(raw, "vision")),

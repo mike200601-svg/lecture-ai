@@ -35,6 +35,10 @@ class RepairError(LectureAIError):
     """选择性重转录、合并或 RAW 完整性校验失败。"""
 
 
+class LLMError(LectureAIError):
+    """LLM 调用、结构化响应或转录清洗失败。"""
+
+
 class SessionNotFound(LectureAIError):
     """指定的 session 不存在。"""
 

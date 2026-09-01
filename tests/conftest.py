@@ -97,11 +97,16 @@ def project_root(tmp_path: Path) -> Path:
     """一个完整的临时项目：含 config、courses、glossary。目录名带中文。"""
     root = tmp_path / CJK_DIRNAME
     (root / "config" / "glossary").mkdir(parents=True)
+    (root / "prompts").mkdir(parents=True)
     (root / "config" / "config.yaml").write_text(MINIMAL_CONFIG, encoding="utf-8")
     (root / "config" / "courses.yaml").write_text(COURSES_YAML, encoding="utf-8")
     (root / "config" / "glossary" / "common.txt").write_text(GLOSSARY_COMMON, encoding="utf-8")
     (root / "config" / "glossary" / "quantum_mechanics.txt").write_text(
         GLOSSARY_QM, encoding="utf-8"
+    )
+    prompt_source = Path(__file__).resolve().parents[1] / "prompts" / "transcript_clean.md"
+    (root / "prompts" / "transcript_clean.md").write_text(
+        prompt_source.read_text(encoding="utf-8"), encoding="utf-8"
     )
     (root / "pyproject.toml").write_text("[project]\nname='t'\n", encoding="utf-8")
     return root

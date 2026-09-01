@@ -71,15 +71,24 @@ repair:
   min_improvement_ratio: 0.20              # 新窗口异常分数至少下降 20%
   min_length_ratio: 0.05                   # 防止用近空结果替换有声内容
 
+# ---------------------------------------------------------------- Phase 2A 忠实清洗
+clean:
+  chunk_minutes: 8                          # 允许范围 5–10 分钟
+  overlap_seconds: 30
+  max_retries: 2
+  retry_base_seconds: 1.0
+  min_retention_ratio: 0.45                 # 防止清洗偷偷变成摘要
+  max_expansion_ratio: 1.35                 # 防止模型扩写/注入外部知识
+
 # ---------------------------------------------------------------- 课程
 course:
   match_tolerance_minutes: 30               # 录音起始时间与课表的容差
   default_course_key: unknown
 
-# ---------------------------------------------------------------- Phase 2 预留
+# ---------------------------------------------------------------- Phase 2A 文本 LLM
 llm:
-  provider: anthropic
-  model: claude-sonnet-5
+  provider: openai
+  model: gpt-5.4-mini
   max_tokens: 8000
   temperature: 0.2
 

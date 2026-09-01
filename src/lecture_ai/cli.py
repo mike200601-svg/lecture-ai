@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
+import os
 import shutil
 import sys
 import unicodedata
@@ -221,6 +223,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
            f"云端音频={config.privacy.allow_cloud_audio} · "
            f"云端图片={config.privacy.allow_cloud_images} · "
            f"云端文本={config.privacy.allow_cloud_transcript}")
+
+    # Phase 2A 文本清洗。缺 key/SDK 不阻塞 Phase 1，因此记 WARN 而非 FAIL。
+    clean_prompt = config.paths.project_root / "prompts" / "transcript_clean.md"
+    report("清洗 prompt", clean_prompt.exists(), str(clean_prompt))
+    if config.llm.provider == "openai":
+        sdk_ready = importlib.util.find_spec("openai") is not None
+        key_ready = bool(os.environ.get("OPENAI_API_KEY"))
+        state = (
+            f"openai/{config.llm.model} · SDK={'ready' if sdk_ready else 'missing'} · "
+            f"OPENAI_API_KEY={'set' if key_ready else 'missing'}"
+        )
+        report("文本 LLM", True if sdk_ready and key_ready else None, state)
+    else:
+        report("文本 LLM", None, f"{config.llm.provider}/{config.llm.model}")
 
     out("=" * 64)
     if problems:
@@ -465,6 +481,44 @@ def cmd_repair(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_clean(args: argparse.Namespace) -> int:
+    """分块清洗 REPAIRED（缺失时回退 RAW）并协调重叠边界。"""
+    from lecture_ai.cleaning import CleanPipeline
+
+    config = _bootstrap(args)
+    outcome = CleanPipeline(config).run(
+        args.session_id,
+        dry_run=args.dry_run,
+        chunk=args.chunk,
+        force=args.force,
+    )
+    if outcome.dry_run:
+        out(
+            f"DRY RUN · {outcome.session_id} · source={outcome.source_layer} · "
+            f"{outcome.message}"
+        )
+        for item in outcome.chunks:
+            out(
+                f"  chunk {item['index']:02d}  core="
+                f"{hhmmss(item['core_start'])}-{hhmmss(item['core_end'])}  "
+                f"window={hhmmss(item['window_start'])}-{hhmmss(item['window_end'])}  "
+                f"segments={len(item['segment_ids'])}"
+            )
+        return EXIT_OK
+    if outcome.partial:
+        out(f"✔ {outcome.session_id}  {outcome.message}")
+        return EXIT_OK
+    marker = "复用" if outcome.reused else "完成"
+    out(
+        f"✔ {outcome.session_id}  清洗{marker}：{outcome.chunks_processed} 块，"
+        f"{outcome.boundaries_processed} 个边界（{outcome.elapsed_sec:.1f} 秒）"
+    )
+    if outcome.output_json:
+        out(f"  JSON  {outcome.output_json}")
+        out(f"  MD    {outcome.output_md}")
+    return EXIT_OK
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """长驻监听 incoming 目录。"""
     from lecture_ai.pipeline import Watcher
@@ -498,7 +552,7 @@ def cmd_export(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lecture-ai",
-        description="课堂自动笔记系统 —— 录音自动转录为带时间戳的文本（Phase 1）",
+        description="课堂自动笔记系统 —— 录音转录、选择性修复与忠实清洗",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "典型用法：\n"
@@ -511,6 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  lecture-ai status <session>    查看单个 session 详情\n"
             "  lecture-ai retry <session>     重试失败的 session\n"
             "  lecture-ai repair <session>    选择性重转录可疑区域\n"
+            "  lecture-ai clean <session>     分块清洗修复后的转录\n"
         ),
     )
     parser.add_argument("--version", action="version", version=f"lecture-ai {__version__}")
@@ -561,6 +616,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_repair.add_argument("--force", action="store_true", help="忽略修复产物缓存后重跑")
     p_repair.set_defaults(func=cmd_repair)
+
+    p_clean = sub.add_parser("clean", help="分块忠实清洗转录并协调边界")
+    p_clean.add_argument("session_id")
+    p_clean.add_argument("--dry-run", action="store_true", help="只显示分块计划，不调用 LLM")
+    p_clean.add_argument("--chunk", type=int, help="只处理指定的 0-based chunk 并写缓存")
+    p_clean.add_argument("--force", action="store_true", help="忽略清洗与逐块缓存后重跑")
+    p_clean.set_defaults(func=cmd_clean)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,

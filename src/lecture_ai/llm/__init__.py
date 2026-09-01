@@ -1,8 +1,14 @@
-"""LLM 接入层 —— Phase 2（AI 课堂笔记）实现，当前仅占位。
+"""Phase 2 LLM 接入层。"""
 
-规划接口：
-    class LLMClient(ABC):
-        def complete(self, prompt, *, system=None, max_tokens, temperature) -> str
+from lecture_ai.llm.base import LLMClient, LLMResponse
+from lecture_ai.llm.fake import FakeLLMClient
+from lecture_ai.llm.openai_client import OpenAILLMClient
+from lecture_ai.llm.registry import build_llm_client
 
-Prompt 一律放 prompts/*.md，禁止硬编码在 Python 里。
-"""
+__all__ = [
+    "LLMClient",
+    "LLMResponse",
+    "FakeLLMClient",
+    "OpenAILLMClient",
+    "build_llm_client",
+]

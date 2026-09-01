@@ -8,7 +8,7 @@ Python 侧只做变量替换与调用，改 prompt 不需要改代码。
 
 | 文件 | 阶段 | 用途 |
 |---|---|---|
-| `clean_transcript.md` | Phase 2 | ASR 纠错，不做总结 |
+| `transcript_clean.md` | Phase 2A | 忠实 ASR 纠错、分块清洗与边界协调，不做总结 |
 | `chapter_detection.md` | Phase 2 | 识别章节结构 |
 | `lecture_note.md` | Phase 2 | 生成最终课堂笔记 |
 | `concept_extraction.md` | Phase 2 | 抽取概念（受重要性阈值约束） |
