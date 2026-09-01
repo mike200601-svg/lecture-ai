@@ -2,10 +2,10 @@
 
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
-**当前进度：Phase 1（音频自动转录）已实现，等待真实课堂录音验收。**
+**当前进度：Phase 1（音频自动转录）与手机自动入站已部署，正在做真实课堂录音验收。**
 
 ```text
-手机录音 → 复制进 incoming → 自动建 Session → 转码 → Whisper 转录 → 带时间戳的 transcript
+荣耀录音机 → Syncthing-Fork → incoming → 自动建 Session → 转码 → Whisper 转录 → 带时间戳的 transcript
 ```
 
 Phase 2（AI 笔记整理）、Phase 3（板书融合）、Phase 4（Obsidian 集成）尚未开始，
@@ -78,6 +78,37 @@ python -m lecture_ai retry <session_id>    # 重试失败的（不会重跑已�
 - `transcript_raw.json` —— 带 segment 级时间戳，供 Phase 2/3 使用
 - `transcript_raw.md` —— 人类可读版，`[00:24:12] 文本` 逐行
 
+### 5. 手机自动同步（当前正式方案）
+
+手机端使用 Syncthing-Fork，电脑端使用 Syncthing 2.1.3：
+
+```text
+Android /storage/emulated/0/Sounds（Send Only）
+  → Syncthing 动态发现 / 中继
+  → data/incoming/audio（Receive Only）
+  → LectureAI Watch
+```
+
+- 手机录音机可继续使用原生 M4A，不需要改文件名或手动复制。
+- 手机可以熄屏；Syncthing-Fork 已允许后台运行、移动数据和计量 Wi-Fi。
+- 电脑必须保持开机且不能睡眠。当前交流电策略为屏幕 10 分钟后关闭、睡眠/休眠关闭；
+  交流电合盖动作也是“不执行操作”。
+- Windows 任务计划程序中的 `LectureAI Syncthing` 和 `LectureAI Watch` 会在登录时启动，
+  也允许在电池供电时运行并自动重启。
+- `processing.keep_incoming` 必须保持 `true`。Syncthing 的接收目录是同步真相源；若 watcher
+  把源文件移走，Syncthing 会重新下载它。Session 中仍会保留独立的原始录音副本。
+- 正在录制的 M4A 可能出现短暂稳定的中间快照，但它没有最终 `moov` 元数据时无法解码；
+  pipeline 会在建 Session 前拒绝它并稍后重试，不会产生半截转录。
+
+已经实测不同网络下可经公共 relay 连接，手机上的 v2rayNG 可以继续作为唯一 VPN。
+不要再设置 Android 全局 HTTP 代理；Android 同一时间通常只能有一个 VPN 服务。
+
+备用方案是 `scripts/setup_phone_sftp.ps1` 提供的 Tailscale + 密钥 SFTP。它会占用手机的
+VPN 槽，因此仅在 Syncthing 故障时手动启用，不作为日常主链路。
+
+远程查看电脑选用 RustDesk（Windows 服务自动启动）。手机与电脑均已安装 1.4.9；首次
+无人值守使用前，需要用户本人在电脑端设置一个永久密码，密码不要写进仓库或聊天记录。
+
 ---
 
 ## 录音文件命名建议
@@ -96,8 +127,18 @@ python -m lecture_ai retry <session_id>    # 重试失败的（不会重跑已�
 ## 关于本机的模型选择
 
 本机是 Intel Core Ultra 5 225H + Arc 130T 核显，**没有 NVIDIA 显卡**，
-所以走 CPU + int8 量化，模型用 `large-v3-turbo` 而不是 `large-v3`
-（后者在 CPU 上跑 90 分钟录音要几个小时）。
+所以当前使用已手动下载的本地 `medium` 模型，走 CPU + int8：
+
+```yaml
+transcription:
+  local_whisper:
+    model: models/faster-whisper-medium
+    device: cpu
+    compute_type: int8
+```
+
+相对模型路径按项目根解析；`models/` 已被 `.gitignore` 忽略，权重不会进入 Git。
+`doctor` 会检查 `model.bin`、`config.json`、`tokenizer.json`、`vocabulary.txt`，并实际初始化模型。
 
 换机器只改 [config/config.yaml](config/config.yaml)，代码不用动：
 
@@ -116,8 +157,8 @@ python scripts/bench_asr.py <一段10～15分钟真实课堂录音> --models "me
 ```
 
 `tiny` 只用于单元测试和 smoke test，不能作为真实课堂默认模型。运行
-`python -m lecture_ai doctor` 可分别查看 tiny / medium / large-v3-turbo 的
-`ready`、`partial` 或 `missing` 状态及项目缓存位置。
+`python -m lecture_ai doctor` 可查看 Hugging Face 缓存及配置中的本地模型是
+`ready`、`partial` 还是 `missing`，同时显示来源、大小、路径和本地模型加载结果。
 
 ---
 

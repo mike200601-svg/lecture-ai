@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,13 +20,22 @@ CLOUD_PROVIDERS = {"openai"}
 
 KNOWN_PROVIDERS = {"local_whisper", "openai", "fake"}
 
+LOCAL_MODEL_REQUIRED_FILES = (
+    "model.bin",
+    "config.json",
+    "tokenizer.json",
+    "vocabulary.txt",
+)
+
 
 @dataclass(frozen=True)
 class ModelCacheStatus:
     model: str
     state: str  # ready | partial | missing
     path: Path
+    source: str  # local | cache
     size_bytes: int = 0
+    missing_files: tuple[str, ...] = ()
 
 
 def build_transcriber(config: Config) -> Transcriber:
@@ -51,7 +62,7 @@ def build_transcriber(config: Config) -> Transcriber:
         )
 
         return FasterWhisperTranscriber(
-            model=lw.model,
+            model=resolve_model_reference(lw.model, config.paths.project_root),
             device=_resolve_device(lw.device),
             compute_type=lw.compute_type,
             cpu_threads=lw.cpu_threads,
@@ -72,22 +83,63 @@ def build_transcriber(config: Config) -> Transcriber:
     return FakeTranscriber()
 
 
+def resolve_model_reference(model: str, project_root: Path) -> str:
+    """把项目内相对模型目录解析成绝对路径；HF 模型名保持原样。"""
+    candidate = Path(model).expanduser()
+    if candidate.is_absolute():
+        return str(candidate.resolve())
+    project_local = (Path(project_root) / candidate).resolve()
+    return str(project_local) if project_local.exists() else model
+
+
 def inspect_model_cache(model: str, cache_dir) -> ModelCacheStatus:
     """检查模型在项目统一缓存中的状态，不触发网络访问。"""
-    local = Path(model)
+    local = Path(model).expanduser()
     if local.is_absolute():
-        state = "ready" if local.exists() and any(local.rglob("model.bin")) else "missing"
-        return ModelCacheStatus(model, state, local, _tree_size(local) if local.exists() else 0)
+        if not local.exists():
+            return ModelCacheStatus(model, "missing", local, "local")
+        missing = tuple(name for name in LOCAL_MODEL_REQUIRED_FILES if not (local / name).is_file())
+        state = "ready" if local.is_dir() and not missing else "partial"
+        return ModelCacheStatus(
+            model,
+            state,
+            local,
+            "local",
+            _tree_size(local),
+            missing,
+        )
 
     root = Path(cache_dir) / "models"
     matches = sorted(root.glob(f"models--*--faster-whisper-{model}")) if root.exists() else []
     if not matches:
-        return ModelCacheStatus(model, "missing", root)
+        return ModelCacheStatus(model, "missing", root, "cache")
 
     repo_dir = matches[0]
     size = _tree_size(repo_dir)
     state = "ready" if any(repo_dir.rglob("model.bin")) else "partial"
-    return ModelCacheStatus(model, state, repo_dir, size)
+    return ModelCacheStatus(model, state, repo_dir, "cache", size)
+
+
+def validate_local_model(
+    model_dir: Path,
+    *,
+    device: str,
+    compute_type: str,
+    cpu_threads: int = 0,
+) -> float:
+    """实际初始化本地 CTranslate2 模型，成功时返回加载秒数。"""
+    from faster_whisper import WhisperModel
+
+    started = time.monotonic()
+    model = WhisperModel(
+        str(model_dir),
+        device=_resolve_device(device),
+        compute_type=compute_type,
+        cpu_threads=cpu_threads or (os.cpu_count() or 4),
+    )
+    elapsed = time.monotonic() - started
+    del model
+    return elapsed
 
 
 def find_cached_model(model: str, cache_dir) -> Path | None:

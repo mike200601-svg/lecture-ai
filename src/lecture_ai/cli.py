@@ -130,20 +130,48 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             report("faster-whisper", True,
                    f"已安装 · 模型 {lw.model} · device={lw.device} · {lw.compute_type}")
 
-            from lecture_ai.transcription import inspect_model_cache
+            from lecture_ai.transcription import (
+                inspect_model_cache,
+                resolve_model_reference,
+                validate_local_model,
+            )
 
-            models = list(dict.fromkeys(("tiny", "medium", "large-v3-turbo", lw.model)))
+            configured_model = resolve_model_reference(lw.model, config.paths.project_root)
+            models = list(dict.fromkeys(("tiny", "medium", "large-v3-turbo", configured_model)))
             for model in models:
                 cached = inspect_model_cache(model, config.paths.cache_dir)
                 size = f"{cached.size_bytes / 2**20:.1f} MiB"
-                detail = f"{cached.state} · {size} · {cached.path}"
-                if cached.state == "ready":
+                state = cached.state
+                load_detail = ""
+                if model == configured_model and cached.source == "local" and state == "ready":
+                    try:
+                        elapsed = validate_local_model(
+                            cached.path,
+                            device=lw.device,
+                            compute_type=lw.compute_type,
+                            cpu_threads=lw.cpu_threads,
+                        )
+                        load_detail = f" · load OK {elapsed:.2f}s"
+                    except Exception as exc:  # CTranslate2 的异常类型不稳定
+                        state = "partial"
+                        load_detail = f" · load failed: {exc}"
+
+                missing = (
+                    f" · missing={','.join(cached.missing_files)}"
+                    if cached.missing_files else ""
+                )
+                detail = (
+                    f"{state.upper()} · source: {cached.source} · {size} · "
+                    f"path: {cached.path}{missing}{load_detail}"
+                )
+                if state == "ready":
                     ok = True
-                elif model == lw.model:
+                elif model == configured_model:
                     ok = False  # 当前配置的模型不可用会直接阻塞真实转录
                 else:
                     ok = None
-                report(f"模型 {model}", ok, detail)
+                display = cached.path.name if cached.source == "local" else model
+                report(f"模型 {display}", ok, detail)
         except ImportError:
             report("faster-whisper", False,
                    '未安装。运行：pip install "lecture-ai[asr]"')

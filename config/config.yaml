@@ -20,9 +20,9 @@ transcription:
 
   local_whisper:
     # 本机为 Intel Core Ultra 5 225H + Arc 130T（无 CUDA），故走 CPU int8。
-    # large-v3 在 CPU 上过慢（90min 录音需 2.5h+），改用 turbo 版本。
+    # medium 已手动下载到项目 models/，使用本地目录避免运行时联网。
     # 若以后换成 NVIDIA 机器：model: large-v3 / device: cuda / compute_type: float16
-    model: large-v3-turbo
+    model: models/faster-whisper-medium
     device: cpu                             # cpu | cuda | auto
     compute_type: int8                      # int8 | int8_float16 | float16 | float32
     cpu_threads: 0                          # 0 = 自动（取物理核心数）
@@ -55,7 +55,7 @@ processing:
   poll_interval: 15                         # watch 轮询间隔（秒）
   stable_checks: 2                          # 连续几次采样大小/时间不变才算写入完成
   quiet_seconds: 10                         # 距最后修改至少多少秒
-  keep_incoming: false                      # true = 复制而非移动（原文件留在 incoming）
+  keep_incoming: true                       # Syncthing 接收目录必须保留源文件，避免移动后被重复下载
   min_audio_seconds: 60                     # 短于此时长的音频不建 session（防误触录音）
 
 # ---------------------------------------------------------------- 课程

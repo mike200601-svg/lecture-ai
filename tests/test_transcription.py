@@ -204,6 +204,17 @@ def test_local_whisper_built_from_config(config):
     assert t.model_name == "tiny"
 
 
+def test_relative_local_model_is_resolved_from_project_root(config):
+    local = config.paths.project_root / "models" / "faster-whisper-medium"
+    local.mkdir(parents=True)
+    config.transcription.provider = "local_whisper"
+    config.transcription.local_whisper.model = "models/faster-whisper-medium"
+
+    t = build_transcriber(config)
+
+    assert t.model_name == str(local.resolve())
+
+
 def test_transcribe_options_defaults():
     o = TranscribeOptions()
     # 长音频必须关掉 condition_on_previous_text，否则 Whisper 会复读
@@ -248,3 +259,56 @@ def test_find_cached_model_missing(config):
     status = inspect_model_cache("large-v3-turbo", config.paths.cache_dir)
     assert status.state == "missing"
     assert status.size_bytes == 0
+
+
+def test_inspect_complete_local_model_is_ready(config):
+    from lecture_ai.transcription import inspect_model_cache
+    from lecture_ai.transcription.registry import LOCAL_MODEL_REQUIRED_FILES
+
+    local = config.paths.project_root / "models" / "faster-whisper-medium"
+    local.mkdir(parents=True)
+    for name in LOCAL_MODEL_REQUIRED_FILES:
+        (local / name).write_bytes(b"ok")
+
+    status = inspect_model_cache(str(local.resolve()), config.paths.cache_dir)
+
+    assert status.state == "ready"
+    assert status.source == "local"
+    assert status.missing_files == ()
+
+
+def test_inspect_incomplete_local_model_is_partial(config):
+    from lecture_ai.transcription import inspect_model_cache
+
+    local = config.paths.project_root / "models" / "incomplete"
+    local.mkdir(parents=True)
+    (local / "model.bin").write_bytes(b"weights")
+
+    status = inspect_model_cache(str(local.resolve()), config.paths.cache_dir)
+
+    assert status.state == "partial"
+    assert status.source == "local"
+    assert "config.json" in status.missing_files
+
+
+def test_validate_local_model_initializes_faster_whisper(config, monkeypatch):
+    import faster_whisper
+
+    from lecture_ai.transcription import validate_local_model
+
+    seen = {}
+
+    def fake_model(path, **kwargs):
+        seen["path"] = path
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(faster_whisper, "WhisperModel", fake_model)
+    local = config.paths.project_root / "models" / "medium"
+    elapsed = validate_local_model(local, device="cpu", compute_type="int8", cpu_threads=2)
+
+    assert elapsed >= 0
+    assert seen["path"] == str(local)
+    assert seen["device"] == "cpu"
+    assert seen["compute_type"] == "int8"
+    assert seen["cpu_threads"] == 2

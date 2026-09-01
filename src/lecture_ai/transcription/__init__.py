@@ -14,6 +14,8 @@ from lecture_ai.transcription.registry import (
     build_transcriber,
     find_cached_model,
     inspect_model_cache,
+    resolve_model_reference,
+    validate_local_model,
 )
 from lecture_ai.transcription.writer import (
     TRANSCRIPT_JSON,
@@ -34,6 +36,8 @@ __all__ = [
     "build_transcriber",
     "find_cached_model",
     "inspect_model_cache",
+    "resolve_model_reference",
+    "validate_local_model",
     "ModelCacheStatus",
     "Glossary",
     "load_glossary",
