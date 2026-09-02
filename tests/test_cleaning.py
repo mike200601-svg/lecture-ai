@@ -505,3 +505,26 @@ def test_web_full_clean_prepares_all_chunks_without_marking_failure(config, db):
     assert all(item["waiting"] for item in outcome.chunks)
     assert CleanPipeline(config, db).sessions.load(meta.session_id).steps["clean"].status == "pending"
     assert not (session_dir / "analysis" / "transcript_clean.json").exists()
+
+
+def test_invalid_web_response_is_archived_with_retry_instructions(config, db):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    pipeline = CleanPipeline(config, db, sleep=lambda _: None)
+    pipeline.run(meta.session_id)
+    exchange = session_dir / "analysis" / "clean_web" / "chunk_000"
+    (exchange / "response.json").write_text(
+        '{"segments": []}', encoding="utf-8"
+    )
+
+    outcome = pipeline.run(meta.session_id)
+
+    assert outcome.partial
+    assert not (exchange / "response.json").exists()
+    assert len(list(exchange.glob("response.rejected.*.json"))) == 1
+    retry = (exchange / "retry.md").read_text(encoding="utf-8")
+    assert "segment 拓扑" in retry
+    assert "程序不会自动猜测" in retry
+    assert pipeline.sessions.load(meta.session_id).steps["clean"].status == "pending"

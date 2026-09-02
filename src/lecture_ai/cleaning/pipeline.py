@@ -145,6 +145,9 @@ class CleanPipeline:
                             meta.course.name,
                             glossary.terms,
                             fingerprint,
+                            source_sha,
+                            source_layer,
+                            session_id,
                             session_dir,
                             client,
                             force,
@@ -367,6 +370,9 @@ class CleanPipeline:
                     meta.course.name,
                     glossary.terms,
                     fingerprint,
+                    source_sha,
+                    source_layer,
+                    session_id,
                     session_dir,
                     client,
                     force,
@@ -528,6 +534,9 @@ class CleanPipeline:
         course_name: str,
         glossary: list[str],
         fingerprint: str,
+        source_sha: str,
+        source_layer: str,
+        session_id: str,
         session_dir: Path,
         client: LLMClient,
         force: bool,
@@ -565,6 +574,13 @@ class CleanPipeline:
             request_context={
                 "stage": "chunk",
                 "index": plan.index,
+                "session_id": session_id,
+                "course": course_name,
+                "source_layer": source_layer,
+                "source_sha256": source_sha,
+                "clean_fingerprint": fingerprint,
+                "clean_schema_version": CLEAN_SCHEMA_VERSION,
+                "chunk": plan.to_dict(),
                 "exchange_dir": exchange_dir or (
                     session_dir / "analysis" / "clean_web"
                     / f"chunk_{plan.index:03d}"
@@ -832,6 +848,14 @@ class CleanPipeline:
             except Exception as exc:
                 if isinstance(exc, WebResponseRequired):
                     raise
+                if client.provider == "chatgpt_web" and self._reject_web_response(
+                    request_context, exc
+                ):
+                    exchange_dir = Path(str(request_context["exchange_dir"]))
+                    raise WebResponseRequired(
+                        f"GPT 网页响应未通过严格校验；已封存并生成 "
+                        f"{exchange_dir / 'retry.md'}，请重新输出完整 JSON"
+                    ) from exc
                 last_error = exc
                 if attempt >= self.config.clean.max_retries:
                     break
@@ -840,6 +864,45 @@ class CleanPipeline:
             f"LLM 结构化清洗在 {self.config.clean.max_retries + 1} 次尝试后失败："
             f"{last_error}"
         ) from last_error
+
+    @staticmethod
+    def _reject_web_response(
+        request_context: dict[str, Any] | None,
+        error: Exception,
+    ) -> bool:
+        """封存不合格网页响应并生成重试说明；不猜测或修改 GPT 输出。"""
+        if not request_context or not request_context.get("exchange_dir"):
+            return False
+        exchange_dir = Path(str(request_context["exchange_dir"]))
+        response_path = exchange_dir / "response.json"
+        if not response_path.exists():
+            return False
+        digest = sha256_file(response_path)[:12]
+        rejected = exchange_dir / f"response.rejected.{digest}.json"
+        suffix = 1
+        while rejected.exists():
+            rejected = exchange_dir / f"response.rejected.{digest}.{suffix}.json"
+            suffix += 1
+        response_path.rename(rejected)
+        retry_text = "\n".join((
+            "# GPT 网页清洗结果被拒绝",
+            "",
+            f"校验错误：{error}",
+            f"已封存原响应：{rejected.name}",
+            "",
+            "请重新使用当前 prompt.md 与 schema.json：",
+            "",
+            "1. 返回完整 JSON，不要只返回修补片段；",
+            "2. 不要增加、删除或重排 segment id；",
+            "3. 顶层只能包含 segments；",
+            "4. 每个 segment 必须包含 text、uncertain、visual_references、corrections；",
+            "5. 只输出 JSON（允许单个 ```json 代码围栏），不要附加说明；",
+            "6. 将新结果保存为 response.json 后重新运行 clean。",
+            "",
+            "程序不会自动猜测或修补被拒绝的回复。",
+        ))
+        atomic_write_text(exchange_dir / "retry.md", retry_text)
+        return True
 
     @staticmethod
     def _call_key(

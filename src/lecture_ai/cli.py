@@ -526,6 +526,17 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return EXIT_OK
     if outcome.partial:
         out(f"✔ {outcome.session_id}  {outcome.message}")
+        for item in outcome.chunks:
+            if item.get("waiting"):
+                label = (
+                    f"chunk {int(item['index']):03d}"
+                    if item.get("stage") == "chunk"
+                    else f"boundary {item.get('index')}"
+                )
+                out(f"  {label} prompt   {item['prompt']}")
+                out(f"             response {item['response']}")
+            elif item.get("cache_origin") == "canary":
+                out(f"  chunk {int(item['index']):03d} 已复用验收通过的 Canary")
         return EXIT_OK
     marker = "复用" if outcome.reused else "完成"
     out(

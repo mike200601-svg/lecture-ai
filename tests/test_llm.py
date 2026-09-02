@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -72,7 +73,17 @@ def test_unknown_llm_provider_rejected(config):
 def test_chatgpt_web_client_prepares_exchange_and_imports_response(tmp_path):
     exchange = tmp_path / "chunk_002"
     client = ChatGPTWebClient("chatgpt-web-high")
-    context = {"exchange_dir": exchange, "stage": "chunk", "index": 2}
+    context = {
+        "exchange_dir": exchange,
+        "stage": "chunk",
+        "index": 2,
+        "session_id": "gold-1",
+        "source_layer": "REPAIRED",
+        "source_sha256": "abc123",
+        "clean_fingerprint": "fingerprint-1",
+        "clean_schema_version": 2,
+        "chunk": {"index": 2, "window_start": 930.0, "window_end": 1470.0},
+    }
     with pytest.raises(WebResponseRequired, match="GPT 网页任务已生成"):
         client.complete(
             "prompt text", json_schema={"type": "object"},
@@ -80,6 +91,13 @@ def test_chatgpt_web_client_prepares_exchange_and_imports_response(tmp_path):
         )
     assert (exchange / "prompt.md").read_text(encoding="utf-8") == "prompt text"
     assert not (exchange / "response.json").exists()
+    request = json.loads((exchange / "request.json").read_text(encoding="utf-8"))
+    assert request["session_id"] == "gold-1"
+    assert request["source_layer"] == "REPAIRED"
+    assert request["source_sha256"] == "abc123"
+    assert request["clean_fingerprint"] == "fingerprint-1"
+    assert request["chunk"]["index"] == 2
+    assert len(request["schema_sha256"]) == 64
 
     (exchange / "response.json").write_text(
         '```json\n{"segments": []}\n```', encoding="utf-8"

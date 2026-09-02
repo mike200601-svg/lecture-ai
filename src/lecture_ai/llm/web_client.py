@@ -65,10 +65,9 @@ class ChatGPTWebClient(LLMClient):
                 previous_prompt_sha,
             )
         atomic_write_text(prompt_path, prompt)
-        atomic_write_text(
-            schema_path,
-            json.dumps(json_schema or {}, ensure_ascii=False, indent=2),
-        )
+        schema_text = json.dumps(json_schema or {}, ensure_ascii=False, indent=2)
+        schema_sha = hashlib.sha256(schema_text.encode("utf-8")).hexdigest()
+        atomic_write_text(schema_path, schema_text)
         atomic_write_text(
             request_path,
             json.dumps(
@@ -78,7 +77,15 @@ class ChatGPTWebClient(LLMClient):
                     "stage": context.get("stage"),
                     "index": context.get("index"),
                     "prompt_sha256": prompt_sha,
+                    "schema_sha256": schema_sha,
                     "prompt_chars": len(prompt),
+                    "session_id": context.get("session_id"),
+                    "course": context.get("course"),
+                    "source_layer": context.get("source_layer"),
+                    "source_sha256": context.get("source_sha256"),
+                    "clean_fingerprint": context.get("clean_fingerprint"),
+                    "clean_schema_version": context.get("clean_schema_version"),
+                    "chunk": context.get("chunk"),
                     "created_at": to_iso(now_local()),
                     "response_file": "response.json",
                     "token_usage_available": False,
