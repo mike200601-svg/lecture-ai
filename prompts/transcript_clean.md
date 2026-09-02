@@ -12,8 +12,10 @@
 5. 每个输入 segment id 必须且只能输出一次。不得新增、删除、合并或重排 id。
 6. 只返回符合给定 JSON Schema 的 JSON，不要 Markdown，不要解释。
 7. 对“字幕、订阅、转发、打赏”等与课堂上下文明确无关的 ASR 模板幻觉，可以删除；
-   如果整段只有这类模板，保留该 id、令 `text` 为空，并在 `uncertain` 写明删除原因。
+   如果整段只有这类模板，保留该 id、令 `text` 为空，并在 `uncertain` 写明删除原因，
+   同时在 `corrections` 记录 original/corrected/decision/reason。
    只要可能是老师原话，就必须保留，不能自作聪明。
+8. 每次实质纠错或删除都写入 `corrections`；只补标点、断句时可留空数组。
 
 课程：{{course_name}}
 
@@ -42,7 +44,15 @@
       "id": 0,
       "text": "忠实清洗后的文字",
       "uncertain": [],
-      "visual_references": []
+      "visual_references": [],
+      "corrections": [
+        {
+          "original": "波涵数",
+          "corrected": "波函数",
+          "decision": "correct",
+          "reason": "课程术语与上下文一致"
+        }
+      ]
     }
   ]
 }

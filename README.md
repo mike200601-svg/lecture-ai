@@ -3,7 +3,7 @@
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
 **当前进度：Phase 1 真实课堂链路已验收；Phase 1.5 选择性修复已完成；Phase 2A
-清洗基础设施已完成，等待真实 LLM key。**
+清洗基础设施已完成，正在进行 GPT 网页版 Canary 验收。**
 
 ```text
 荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
@@ -27,7 +27,7 @@ py -3.13 -m venv .venv
 python -m pip install -U pip
 python -m pip install -e ".[dev,asr,ffmpeg]"
 
-# 需要运行 Phase 2A 真实云端清洗时再安装（只传文本，不传音频）
+# 仅使用可选 OpenAI API provider 时才需要；默认 GPT 网页模式无需 SDK/API key
 python -m pip install -e ".[cloud]"
 
 # ffmpeg（二选一）
@@ -80,6 +80,7 @@ python -m lecture_ai repair <session_id>   # 只重转录复读/幻觉可疑窗�
 python -m lecture_ai repair <session_id> --dry-run
 python -m lecture_ai clean <session_id>    # REPAIRED 优先，缺失时读 RAW
 python -m lecture_ai clean <session_id> --dry-run
+python -m lecture_ai clean-canary <session_id> --chunks 2 5 9
 ```
 
 产物在 `data/sessions/<session_id>/transcript/`：
@@ -92,10 +93,13 @@ Phase 2A 产物在同一 Session 的 `analysis/`：
 
 - `transcript_clean.json` —— 正式机器输入，保留时间戳、source SHA、chunk 与 uncertainty
 - `transcript_clean.md` —— 人工抽查版
-- `clean_cache/` —— 逐块和边界缓存；某一 API 调用失败不会重跑已成功块
+- `clean_cache/` —— 逐块和边界缓存；某次 LLM 处理失败不会重跑已成功块
+- `canary/chunk_NNN/` —— 隔离的 RAW/REPAIRED/CLEANED 对照与 GPT 网页交换文件
 
-真实清洗需要在 `.env` 写入 `OPENAI_API_KEY=...`。当前没有 key 时命令会明确停止在
-`WAITING FOR REAL LLM PROVIDER`，不会用 FakeLLM 冒充真实产物。
+默认 `llm.provider=chatgpt_web`：运行 `clean-canary` 后，把每个 `prompt.md` 分别粘贴到
+GPT 网页的新对话，将严格 JSON 回复保存为同目录 `response.json`，再运行同一命令完成
+schema/拓扑/长度校验并生成 `cleaned.json/.md`。Canary 通过前禁止生成 Gold 正式 CLEANED。
+可选 `openai` API provider 仍保留，只有使用它时才从 `.env` 读取 `OPENAI_API_KEY`。
 
 ### 5. 手机自动同步（当前正式方案）
 
@@ -188,7 +192,7 @@ python scripts/bench_asr.py <一段10～15分钟真实课堂录音> --models "me
 ```yaml
 privacy:
   allow_cloud_audio: false      # 硬闸门：false 时禁止任何云端 ASR
-  allow_cloud_images: true
+  allow_cloud_images: false
   allow_cloud_transcript: true
 ```
 
@@ -198,8 +202,8 @@ privacy:
 `allow_cloud_transcript: false` 同样会硬性禁止 Phase 2A 云端文本清洗。Phase 2A 默认只发送
 分块转录文字与术语表；原始音频仍留在本机。
 
-API key 只能写在 `.env`（见 [.env.example](.env.example)）。
-写进 `config.yaml` 会被配置加载器直接报错，防止误提交。
+若启用可选 API provider，API key 只能写在 `.env`（见 [.env.example](.env.example)）。
+写进 `config.yaml` 会被配置加载器直接报错，防止误提交。GPT 网页模式无需 key。
 
 ---
 

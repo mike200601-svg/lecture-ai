@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from lecture_ai.cleaning.chunking import build_chunk_plan
+from lecture_ai.cleaning.boundary import decide_boundary
 from lecture_ai.cleaning.models import ChunkPlan, CleanOutcome
 from lecture_ai.cleaning.prompting import load_clean_prompt, render_clean_prompt
 from lecture_ai.cleaning.schema import CLEAN_RESPONSE_SCHEMA, validate_clean_response
 from lecture_ai.config import Config
 from lecture_ai.database import Database
-from lecture_ai.errors import LLMError
+from lecture_ai.errors import LLMError, WebResponseRequired
 from lecture_ai.llm import LLMClient, build_llm_client
 from lecture_ai.repair import REPAIRED_JSON
 from lecture_ai.session import SessionManager, load_courses
@@ -132,20 +133,63 @@ class CleanPipeline:
         try:
             client = self._get_client()
             selected_plans = [plan for plan in plans if chunk is None or plan.index == chunk]
-            chunk_records = [
-                self._clean_chunk(
-                    plan,
-                    segments,
-                    template,
-                    meta.course.name,
-                    glossary.terms,
-                    fingerprint,
-                    session_dir,
-                    client,
-                    force,
+            chunk_records: list[dict[str, Any]] = []
+            pending_chunks: list[dict[str, Any]] = []
+            for plan in selected_plans:
+                try:
+                    chunk_records.append(
+                        self._clean_chunk(
+                            plan,
+                            segments,
+                            template,
+                            meta.course.name,
+                            glossary.terms,
+                            fingerprint,
+                            session_dir,
+                            client,
+                            force,
+                        )
+                    )
+                except WebResponseRequired as exc:
+                    exchange_dir = (
+                        session_dir / "analysis" / "clean_web"
+                        / f"chunk_{plan.index:03d}"
+                    )
+                    pending_chunks.append(
+                        {
+                            "stage": "chunk",
+                            "index": plan.index,
+                            "waiting": True,
+                            "prompt": str(exchange_dir / "prompt.md"),
+                            "response": str(exchange_dir / "response.json"),
+                            "message": str(exc),
+                        }
+                    )
+            if pending_chunks:
+                if chunk is None:
+                    self.sessions.mark_step(
+                        meta,
+                        STEP_CLEAN,
+                        "pending",
+                        provider=client.provider,
+                        model=client.model,
+                    )
+                return CleanOutcome(
+                    session_id=session_id,
+                    source_layer=source_layer,
+                    chunks_planned=len(plans),
+                    chunks_processed=len(chunk_records),
+                    partial=True,
+                    elapsed_sec=time.monotonic() - started,
+                    message=(
+                        f"已准备 {len(selected_plans)} 个块；"
+                        f"{len(pending_chunks)} 个等待 GPT 网页 response.json"
+                    ),
+                    chunks=(
+                        [self._record_audit(record) for record in chunk_records]
+                        + pending_chunks
+                    ),
                 )
-                for plan in selected_plans
-            ]
             if chunk is not None:
                 return CleanOutcome(
                     session_id=session_id,
@@ -169,6 +213,32 @@ class CleanPipeline:
                 client,
                 force,
             )
+            pending_boundaries = [record for record in boundaries if record.get("waiting")]
+            if pending_boundaries:
+                self.sessions.mark_step(
+                    meta,
+                    STEP_CLEAN,
+                    "pending",
+                    provider=client.provider,
+                    model=client.model,
+                )
+                return CleanOutcome(
+                    session_id=session_id,
+                    source_layer=source_layer,
+                    chunks_planned=len(plans),
+                    chunks_processed=len(chunk_records),
+                    boundaries_processed=len(boundaries) - len(pending_boundaries),
+                    partial=True,
+                    elapsed_sec=time.monotonic() - started,
+                    message=(
+                        f"全部 {len(chunk_records)} 个块已校验；"
+                        f"{len(pending_boundaries)} 个冲突边界等待 GPT 网页 response.json"
+                    ),
+                    chunks=(
+                        [self._record_audit(record) for record in chunk_records]
+                        + [self._record_audit(record) for record in boundaries]
+                    ),
+                )
             cleaned = self._assemble(
                 segments,
                 chunk_records,
@@ -225,6 +295,130 @@ class CleanPipeline:
                 raise
             raise LLMError(f"Phase 2A 清洗失败：{exc}") from exc
 
+    def run_canary(
+        self,
+        session_id: str,
+        *,
+        chunks: list[int] | tuple[int, ...] = (2, 5, 9),
+        force: bool = False,
+    ) -> CleanOutcome:
+        """生成/导入隔离 Canary；从不写正式 transcript_clean 产物。"""
+        started = time.monotonic()
+        meta = self.sessions.load(session_id)
+        session_dir = self.sessions.session_dir(session_id)
+        source_path, source_layer = self._select_source(session_dir)
+        source_sha = sha256_file(source_path)
+        source = self._read_source(source_path)
+        segments = self._normalize_segments(source["segments"])
+        duration = float(source.get("duration_sec") or meta.audio.duration_sec or 0.0)
+        raw_path = session_dir / "transcript" / TRANSCRIPT_JSON
+        raw_segments = self._normalize_segments(self._read_source(raw_path)["segments"])
+        repaired_path = session_dir / "transcript" / REPAIRED_JSON
+        repaired_segments = (
+            self._normalize_segments(self._read_source(repaired_path)["segments"])
+            if repaired_path.exists() else raw_segments
+        )
+
+        prompt_path, template = load_clean_prompt(self.config.paths.project_root)
+        prompt_sha = sha256_file(prompt_path)
+        course = self.courses.get(meta.course.key)
+        glossary = load_glossary(
+            self.config.glossary_dir, course.glossary, include_common=True
+        )
+        plans = build_chunk_plan(
+            segments,
+            duration_sec=duration,
+            chunk_minutes=self.config.clean.chunk_minutes,
+            overlap_seconds=self.config.clean.overlap_seconds,
+        )
+        wanted = list(dict.fromkeys(int(value) for value in chunks))
+        plan_map = {plan.index: plan for plan in plans}
+        missing = [value for value in wanted if value not in plan_map]
+        if missing:
+            raise LLMError(
+                f"Canary chunk 不存在：{missing}；可选 0-{max(plan_map, default=-1)}"
+            )
+        fingerprint = self._fingerprint(
+            source_sha=source_sha,
+            source_layer=source_layer,
+            prompt_sha=prompt_sha,
+            glossary_terms=glossary.terms,
+        )
+        client = self._get_client()
+        records: list[dict[str, Any]] = []
+        pending: list[dict[str, Any]] = []
+
+        for index in wanted:
+            plan = plan_map[index]
+            canary_dir = session_dir / "analysis" / "canary" / f"chunk_{index:03d}"
+            atomic_write_text(
+                canary_dir / "raw.md",
+                render_canary_excerpt("RAW", raw_segments, plan),
+            )
+            atomic_write_text(
+                canary_dir / "repaired.md",
+                render_canary_excerpt("REPAIRED", repaired_segments, plan),
+            )
+            try:
+                record = self._clean_chunk(
+                    plan,
+                    segments,
+                    template,
+                    meta.course.name,
+                    glossary.terms,
+                    fingerprint,
+                    session_dir,
+                    client,
+                    force,
+                    cache_path=canary_dir / "cache.json",
+                    exchange_dir=canary_dir,
+                )
+            except WebResponseRequired as exc:
+                pending.append(
+                    {
+                        "index": index,
+                        "directory": str(canary_dir),
+                        "prompt": str(canary_dir / "prompt.md"),
+                        "response": str(canary_dir / "response.json"),
+                        "message": str(exc),
+                    }
+                )
+                continue
+            payload = self._canary_payload(
+                session_id=session_id,
+                course_name=meta.course.name,
+                plan=plan,
+                source_layer=source_layer,
+                source_sha=source_sha,
+                source=segments,
+                record=record,
+            )
+            atomic_write_text(
+                canary_dir / "cleaned.json",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+            )
+            atomic_write_text(canary_dir / "cleaned.md", render_canary_cleaned(payload))
+            records.append(record)
+
+        elapsed = time.monotonic() - started
+        if pending:
+            message = (
+                f"Canary 已准备 {len(wanted)} 段；{len(pending)} 段等待 GPT 网页 response.json，"
+                f"{len(records)} 段已严格校验"
+            )
+        else:
+            message = f"Canary {len(records)} 段均已严格校验；未写正式 CLEANED"
+        return CleanOutcome(
+            session_id=session_id,
+            source_layer=source_layer,
+            chunks_planned=len(wanted),
+            chunks_processed=len(records),
+            partial=True,
+            elapsed_sec=elapsed,
+            message=message,
+            chunks=[self._record_audit(record) for record in records] + pending,
+        )
+
     @staticmethod
     def _select_source(session_dir: Path) -> tuple[Path, str]:
         repaired = session_dir / "transcript" / REPAIRED_JSON
@@ -257,6 +451,7 @@ class CleanPipeline:
                     "text": str(item.get("text") or "").strip(),
                     "uncertain": list(item.get("uncertain") or []),
                     "visual_references": list(item.get("visual_references") or []),
+                    "corrections": list(item.get("corrections") or []),
                     "no_speech_prob": item.get("no_speech_prob"),
                     "avg_logprob": item.get("avg_logprob"),
                 }
@@ -318,6 +513,9 @@ class CleanPipeline:
         session_dir: Path,
         client: LLMClient,
         force: bool,
+        *,
+        cache_path: Path | None = None,
+        exchange_dir: Path | None = None,
     ) -> dict[str, Any]:
         lookup = {item["id"]: item for item in segments}
         inputs = [lookup[segment_id] for segment_id in plan.segment_ids]
@@ -329,12 +527,72 @@ class CleanPipeline:
             segments=inputs,
         )
         key = self._call_key(fingerprint, "chunk", plan.index, inputs)
-        path = session_dir / "analysis" / "clean_cache" / f"chunk_{plan.index:03d}.json"
-        record = self._cached_or_call(path, key, prompt, inputs, client, force)
+        path = cache_path or (
+            session_dir / "analysis" / "clean_cache" / f"chunk_{plan.index:03d}.json"
+        )
+        record = self._cached_or_call(
+            path,
+            key,
+            prompt,
+            inputs,
+            client,
+            force,
+            request_context={
+                "stage": "chunk",
+                "index": plan.index,
+                "exchange_dir": exchange_dir or (
+                    session_dir / "analysis" / "clean_web"
+                    / f"chunk_{plan.index:03d}"
+                ),
+            },
+        )
         record["stage"] = "chunk"
         record["index"] = plan.index
         record["plan"] = plan.to_dict()
         return record
+
+    @staticmethod
+    def _canary_payload(
+        *,
+        session_id: str,
+        course_name: str,
+        plan: ChunkPlan,
+        source_layer: str,
+        source_sha: str,
+        source: list[dict],
+        record: dict[str, Any],
+    ) -> dict[str, Any]:
+        lookup = {int(item["id"]): item for item in source}
+        cleaned = []
+        for item in record["result"]:
+            original = lookup[int(item["id"])]
+            cleaned.append(
+                {
+                    **item,
+                    "start": original["start"],
+                    "end": original["end"],
+                    "provenance": {
+                        "source_layer": source_layer,
+                        "source_sha256": source_sha,
+                        "source_segment_id": int(item["id"]),
+                        "chunk_id": plan.index,
+                    },
+                }
+            )
+        return {
+            "schema_version": CLEAN_SCHEMA_VERSION,
+            "layer": "CLEANED_CANARY",
+            "session_id": session_id,
+            "course": course_name,
+            "created_at": to_iso(now_local()),
+            "provider": record.get("provider"),
+            "model": record.get("model"),
+            "source": {"layer": source_layer, "sha256": source_sha},
+            "plan": plan.to_dict(),
+            "audit": CleanPipeline._record_audit(record),
+            "segment_count": len(cleaned),
+            "segments": cleaned,
+        }
 
     def _reconcile_boundaries(
         self,
@@ -356,6 +614,25 @@ class CleanPipeline:
             shared = [segment_id for segment_id in left_map if segment_id in right_map]
             if not shared:
                 continue
+            left_index, right_index = int(left["index"]), int(right["index"])
+            decision = decide_boundary(left["result"], right["result"])
+            if decision["decision"] == "deterministic":
+                records.append(
+                    {
+                        "stage": "boundary",
+                        "index": f"{left_index}-{right_index}",
+                        "left_chunk": left_index,
+                        "right_chunk": right_index,
+                        "segment_ids": shared,
+                        "decision": "deterministic",
+                        "reasons": decision["reasons"],
+                        "llm_called": False,
+                        "cache_hit": False,
+                        "elapsed_sec": 0.0,
+                        "result": decision["result"],
+                    }
+                )
+                continue
             inputs = []
             for segment_id in shared:
                 original = source_lookup[segment_id]
@@ -375,9 +652,12 @@ class CleanPipeline:
                             left_map[segment_id]["visual_references"]
                             + right_map[segment_id]["visual_references"]
                         )),
+                        "corrections": (
+                            list(left_map[segment_id].get("corrections") or [])
+                            + list(right_map[segment_id].get("corrections") or [])
+                        ),
                     }
                 )
-            left_index, right_index = int(left["index"]), int(right["index"])
             prompt = render_clean_prompt(
                 template,
                 mode="reconcile_boundary",
@@ -393,12 +673,51 @@ class CleanPipeline:
                 session_dir / "analysis" / "clean_cache"
                 / f"boundary_{left_index:03d}_{right_index:03d}.json"
             )
-            record = self._cached_or_call(path, key, prompt, inputs, client, force)
+            exchange_dir = (
+                session_dir / "analysis" / "clean_web"
+                / f"boundary_{left_index:03d}_{right_index:03d}"
+            )
+            try:
+                record = self._cached_or_call(
+                    path,
+                    key,
+                    prompt,
+                    inputs,
+                    client,
+                    force,
+                    request_context={
+                        "stage": "boundary",
+                        "index": f"{left_index}-{right_index}",
+                        "exchange_dir": exchange_dir,
+                    },
+                )
+            except WebResponseRequired as exc:
+                records.append(
+                    {
+                        "stage": "boundary",
+                        "index": f"{left_index}-{right_index}",
+                        "left_chunk": left_index,
+                        "right_chunk": right_index,
+                        "segment_ids": shared,
+                        "decision": "llm",
+                        "reasons": decision["reasons"],
+                        "llm_called": False,
+                        "waiting": True,
+                        "prompt": str(exchange_dir / "prompt.md"),
+                        "response": str(exchange_dir / "response.json"),
+                        "message": str(exc),
+                        "result": [],
+                    }
+                )
+                continue
             record["stage"] = "boundary"
             record["index"] = f"{left_index}-{right_index}"
             record["left_chunk"] = left_index
             record["right_chunk"] = right_index
             record["segment_ids"] = shared
+            record["decision"] = "llm"
+            record["reasons"] = decision["reasons"]
+            record["llm_called"] = True
             records.append(record)
         return records
 
@@ -410,6 +729,7 @@ class CleanPipeline:
         expected: list[dict],
         client: LLMClient,
         force: bool,
+        request_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if path.exists() and not force:
             try:
@@ -429,6 +749,7 @@ class CleanPipeline:
                     json_schema=CLEAN_RESPONSE_SCHEMA,
                     max_tokens=self.config.llm.max_tokens,
                     temperature=self.config.llm.temperature,
+                    request_context=request_context,
                 )
                 parsed = json.loads(response.text)
                 result = validate_clean_response(parsed, expected, self.config.clean)
@@ -441,6 +762,8 @@ class CleanPipeline:
                     "request_id": response.request_id,
                     "usage": response.usage,
                     "retries": attempt,
+                    "attempt_count": attempt + 1,
+                    "failed_attempts": attempt,
                     "elapsed_sec": round(time.monotonic() - call_started, 3),
                     "created_at": to_iso(now_local()),
                     "result": result,
@@ -448,6 +771,8 @@ class CleanPipeline:
                 atomic_write_text(path, json.dumps(record, ensure_ascii=False, indent=2))
                 return record
             except Exception as exc:
+                if isinstance(exc, WebResponseRequired):
+                    raise
                 last_error = exc
                 if attempt >= self.config.clean.max_retries:
                     break
@@ -523,6 +848,7 @@ class CleanPipeline:
                         list(item.get("visual_references") or [])
                         + final["visual_references"]
                     )),
+                    "corrections": list(final.get("corrections") or []),
                     "provenance": {
                         "source_layer": source_layer,
                         "source_file": source_file,
@@ -531,6 +857,20 @@ class CleanPipeline:
                         "chunk_ids": sorted(plan.index for plan, _ in candidates),
                         "primary_chunk_id": selected_plan.index,
                         "boundary_reconciled": boundary is not None,
+                        "boundary_mode": (
+                            next(
+                                (
+                                    record.get("decision")
+                                    for record in boundaries
+                                    if any(
+                                        int(value["id"]) == segment_id
+                                        for value in record.get("result", [])
+                                    )
+                                ),
+                                None,
+                            )
+                            if boundary is not None else None
+                        ),
                         "source_no_speech_prob": item.get("no_speech_prob"),
                         "source_avg_logprob": item.get("avg_logprob"),
                     },
@@ -542,8 +882,10 @@ class CleanPipeline:
     def _record_audit(record: dict[str, Any]) -> dict[str, Any]:
         keys = (
             "stage", "index", "cache_hit", "provider", "model", "request_id",
-            "usage", "retries", "plan", "left_chunk", "right_chunk", "segment_ids",
-            "elapsed_sec",
+            "usage", "retries", "attempt_count", "failed_attempts", "plan",
+            "left_chunk", "right_chunk", "segment_ids", "elapsed_sec", "decision",
+            "reasons", "llm_called",
+            "waiting", "prompt", "response", "message",
         )
         return {key: record[key] for key in keys if key in record}
 
@@ -564,13 +906,31 @@ class CleanPipeline:
         client: LLMClient,
     ) -> dict[str, Any]:
         calls = chunks + boundaries
-        actual = [record for record in calls if not record.get("cache_hit")]
+        llm_records = [
+            record for record in calls
+            if record.get("stage") == "chunk" or record.get("llm_called")
+        ]
+        actual = [record for record in llm_records if not record.get("cache_hit")]
         usage = {
             name: sum(int(record.get("usage", {}).get(name, 0) or 0) for record in actual)
-            for name in ("input_tokens", "output_tokens", "total_tokens")
+            for name in (
+                "input_tokens", "output_tokens", "total_tokens",
+                "input_chars", "output_chars", "web_turns",
+            )
         }
-        usage["api_calls"] = len(actual)
-        usage["cache_hits"] = len(calls) - len(actual)
+        usage["llm_calls"] = len(actual)
+        usage["api_calls"] = sum(
+            1 for record in actual if record.get("provider") == "openai"
+        )
+        usage["cache_hits"] = len(llm_records) - len(actual)
+        usage["requests_total"] = sum(
+            int(record.get("attempt_count", 1) or 1) for record in actual
+        )
+        usage["successful_requests"] = len(actual)
+        usage["failed_requests"] = sum(
+            int(record.get("failed_attempts", 0) or 0) for record in actual
+        )
+        usage["token_usage_available"] = bool(usage["total_tokens"])
         provider = next((record.get("provider") for record in calls if record.get("provider")), client.provider)
         model = next((record.get("model") for record in calls if record.get("model")), client.model)
         return {
@@ -600,6 +960,16 @@ class CleanPipeline:
             "usage": usage,
             "chunks": [self._record_audit(record) for record in chunks],
             "boundaries": [self._record_audit(record) for record in boundaries],
+            "boundary_summary": {
+                "total": len(boundaries),
+                "deterministic": sum(
+                    1 for record in boundaries
+                    if record.get("decision") == "deterministic"
+                ),
+                "llm": sum(
+                    1 for record in boundaries if record.get("decision") == "llm"
+                ),
+            },
             "segment_count": len(cleaned),
             "segments": cleaned,
         }
@@ -626,4 +996,39 @@ def render_clean_markdown(payload: dict[str, Any]) -> str:
         if segment["uncertain"]:
             suffix = "  ⚠ " + "；".join(segment["uncertain"])
         lines.extend((f"`[{hhmmss(float(segment['start']))}]` {segment['text']}{suffix}", ""))
+    return "\n".join(lines)
+
+
+def render_canary_excerpt(layer: str, segments: list[dict], plan: ChunkPlan) -> str:
+    selected = [
+        item for item in segments
+        if float(item["end"]) > plan.window_start
+        and float(item["start"]) < plan.window_end
+    ]
+    lines = [
+        f"# {layer} Canary · chunk {plan.index:03d}",
+        "",
+        f"> window {hhmmss(plan.window_start)}–{hhmmss(plan.window_end)} · "
+        f"segments={len(selected)}",
+        "",
+    ]
+    for item in selected:
+        lines.extend((f"`[{hhmmss(float(item['start']))}]` {item['text']}", ""))
+    return "\n".join(lines)
+
+
+def render_canary_cleaned(payload: dict[str, Any]) -> str:
+    plan = payload["plan"]
+    lines = [
+        f"# CLEANED Canary · chunk {int(plan['index']):03d}",
+        "",
+        f"> provider={payload.get('provider')} · model={payload.get('model')} · "
+        f"window {hhmmss(float(plan['window_start']))}–{hhmmss(float(plan['window_end']))}",
+        "",
+    ]
+    for item in payload["segments"]:
+        suffix = ""
+        if item["uncertain"]:
+            suffix = "  ⚠ " + "；".join(item["uncertain"])
+        lines.extend((f"`[{hhmmss(float(item['start']))}]` {item['text']}{suffix}", ""))
     return "\n".join(lines)

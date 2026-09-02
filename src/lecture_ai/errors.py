@@ -39,6 +39,10 @@ class LLMError(LectureAIError):
     """LLM 调用、结构化响应或转录清洗失败。"""
 
 
+class WebResponseRequired(LLMError):
+    """GPT 网页任务包已生成，等待人工/浏览器把响应写回 response.json。"""
+
+
 class SessionNotFound(LectureAIError):
     """指定的 session 不存在。"""
 

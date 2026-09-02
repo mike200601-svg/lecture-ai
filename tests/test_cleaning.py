@@ -13,6 +13,7 @@ from lecture_ai.cleaning import (
     build_chunk_plan,
     validate_clean_response,
 )
+from lecture_ai.cleaning.boundary import decide_boundary
 from lecture_ai.cleaning.prompting import load_clean_prompt, render_clean_prompt
 from lecture_ai.cli import build_parser
 from lecture_ai.errors import LLMError
@@ -26,18 +27,26 @@ _INPUT = re.compile(r"<input_json>\s*(.*?)\s*</input_json>", re.DOTALL)
 
 def _faithful_responder(prompt: str):
     items = json.loads(_INPUT.search(prompt).group(1))
+    def clean_item(item):
+        original = str(item.get("text") or item.get("left_text") or "")
+        cleaned = original.replace("波涵数", "波函数")
+        corrections = list(item.get("corrections") or [])
+        if cleaned != original:
+            corrections.append({
+                "original": "波涵数",
+                "corrected": "波函数",
+                "decision": "correct",
+                "reason": "术语表与上下文一致",
+            })
+        return {
+            "id": item["id"],
+            "text": cleaned,
+            "uncertain": list(item.get("uncertain") or []),
+            "visual_references": list(item.get("visual_references") or []),
+            "corrections": corrections,
+        }
     return {
-        "segments": [
-            {
-                "id": item["id"],
-                "text": str(item.get("text") or item.get("left_text") or "").replace(
-                    "波涵数", "波函数"
-                ),
-                "uncertain": list(item.get("uncertain") or []),
-                "visual_references": list(item.get("visual_references") or []),
-            }
-            for item in items
-        ]
+        "segments": [clean_item(item) for item in items]
     }
 
 
@@ -101,21 +110,22 @@ def test_clean_response_rejects_topology_and_summary(config):
         {"id": 2, "text": "这里还有例题和考试提示"},
     ]
     missing = {"segments": [{
-        "id": 1, "text": "内容", "uncertain": [], "visual_references": []
+        "id": 1, "text": "内容", "uncertain": [], "visual_references": [],
+        "corrections": [],
     }]}
     with pytest.raises(LLMError, match="拓扑"):
         validate_clean_response(missing, expected, config.clean)
 
     summary = {"segments": [
-        {"id": 1, "text": "推导", "uncertain": [], "visual_references": []},
-        {"id": 2, "text": "例题", "uncertain": [], "visual_references": []},
+        {"id": 1, "text": "推导", "uncertain": [], "visual_references": [], "corrections": []},
+        {"id": 2, "text": "例题", "uncertain": [], "visual_references": [], "corrections": []},
     ]}
     with pytest.raises(LLMError, match="摘要"):
         validate_clean_response(summary, expected, config.clean)
 
     empty_without_audit = {"segments": [
-        {"id": 1, "text": "", "uncertain": [], "visual_references": []},
-        {"id": 2, "text": "这里还有例题和考试提示", "uncertain": [], "visual_references": []},
+        {"id": 1, "text": "", "uncertain": [], "visual_references": [], "corrections": []},
+        {"id": 2, "text": "这里还有例题和考试提示", "uncertain": [], "visual_references": [], "corrections": []},
     ]}
     with pytest.raises(LLMError, match="uncertain"):
         validate_clean_response(empty_without_audit, expected, config.clean)
@@ -142,6 +152,11 @@ def test_clean_cli_supports_dry_run_chunk_and_force():
     assert args.command == "clean"
     assert args.session_id == "session-1"
     assert args.dry_run and args.chunk == 2 and args.force
+    canary = build_parser().parse_args([
+        "clean-canary", "session-1", "--chunks", "2", "5", "9"
+    ])
+    assert canary.command == "clean-canary"
+    assert canary.chunks == [2, 5, 9]
 
 
 def test_clean_pipeline_two_stage_cache_and_provenance(config, db):
@@ -159,13 +174,14 @@ def test_clean_pipeline_two_stage_cache_and_provenance(config, db):
     assert first.source_layer == "REPAIRED"
     assert first.chunks_processed == 2
     assert first.boundaries_processed == 1
-    assert fake.calls == 3
+    assert fake.calls == 2
     assert second.reused and output_path.stat().st_mtime_ns == mtime
 
     output = json.loads(output_path.read_text(encoding="utf-8"))
     assert output["layer"] == "CLEANED"
     assert output["segment_count"] == 10
-    assert output["usage"]["api_calls"] == 3
+    assert output["usage"]["llm_calls"] == 2
+    assert output["boundary_summary"] == {"total": 1, "deterministic": 1, "llm": 0}
     assert all("波函数" in item["text"] for item in output["segments"])
     assert [item["start"] for item in output["segments"]] == [i * 60 for i in range(10)]
     assert any(item["provenance"]["boundary_reconciled"] for item in output["segments"])
@@ -235,7 +251,7 @@ def test_retry_reuses_successful_chunks_and_only_reruns_failed_chunk(config, db)
         config, db, client=recovery_client, sleep=lambda _: None
     ).run(meta.session_id)
     assert recovered.chunks_processed == 2 and recovered.boundaries_processed == 1
-    assert recovery_client.calls == 2  # chunk 1 + boundary；chunk 0 直接复用
+    assert recovery_client.calls == 1  # chunk 1；自然边界确定性合并，chunk 0 直接复用
     assert first_cache.stat().st_mtime_ns == first_mtime
 
 
@@ -248,3 +264,96 @@ def test_clean_invalid_json_fails_without_final_artifact(config, db):
         CleanPipeline(config, db, client=fake, sleep=lambda _: None).run(meta.session_id)
     assert not (session_dir / "analysis" / "transcript_clean.json").exists()
     assert CleanPipeline(config, db).sessions.load(meta.session_id).steps["clean"].status == "failed"
+
+
+def test_boundary_decision_skips_equivalent_text_and_flags_conflict():
+    base = [{
+        "id": 7, "text": "波函数。", "uncertain": [],
+        "visual_references": [], "corrections": [],
+    }]
+    equivalent = [{
+        "id": 7, "text": "波函数", "uncertain": ["轻微断句"],
+        "visual_references": [], "corrections": [],
+    }]
+    conflict = [{
+        "id": 7, "text": "波动方程", "uncertain": [],
+        "visual_references": [], "corrections": [],
+    }]
+    deterministic = decide_boundary(base, equivalent)
+    suspicious = decide_boundary(base, conflict)
+    assert deterministic["decision"] == "deterministic"
+    assert deterministic["result"][0]["uncertain"] == ["轻微断句"]
+    assert suspicious["decision"] == "llm"
+    assert suspicious["conflicting_segment_ids"] == [7]
+
+
+def test_conflicting_boundary_calls_llm(config, db):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "fake"
+    calls = 0
+
+    def conflicting_responder(prompt):
+        nonlocal calls
+        calls += 1
+        result = _faithful_responder(prompt)
+        if calls == 2:
+            result["segments"][0]["text"] += "右侧冲突"
+        return result
+
+    fake = FakeLLMClient(conflicting_responder)
+    CleanPipeline(config, db, client=fake, sleep=lambda _: None).run(meta.session_id)
+    output = json.loads(
+        (session_dir / "analysis" / "transcript_clean.json").read_text(encoding="utf-8")
+    )
+    assert fake.calls == 3
+    assert output["boundary_summary"] == {"total": 1, "deterministic": 0, "llm": 1}
+    assert output["boundaries"][0]["llm_called"] is True
+
+
+def test_canary_outputs_are_isolated_from_formal_clean(config, db):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "fake"
+    fake = FakeLLMClient(_faithful_responder)
+    outcome = CleanPipeline(config, db, client=fake, sleep=lambda _: None).run_canary(
+        meta.session_id, chunks=[0, 1]
+    )
+    assert outcome.chunks_processed == 2
+    for index in (0, 1):
+        root = session_dir / "analysis" / "canary" / f"chunk_{index:03d}"
+        for name in ("raw.md", "repaired.md", "cleaned.json", "cleaned.md"):
+            assert (root / name).exists(), name
+        payload = json.loads((root / "cleaned.json").read_text(encoding="utf-8"))
+        assert payload["layer"] == "CLEANED_CANARY"
+    assert not (session_dir / "analysis" / "transcript_clean.json").exists()
+
+
+def test_web_canary_prepares_every_prompt_before_waiting(config, db):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    outcome = CleanPipeline(config, db, sleep=lambda _: None).run_canary(
+        meta.session_id, chunks=[0, 1]
+    )
+    assert outcome.chunks_processed == 0
+    assert len(outcome.chunks) == 2
+    for index in (0, 1):
+        root = session_dir / "analysis" / "canary" / f"chunk_{index:03d}"
+        assert (root / "prompt.md").exists()
+        assert (root / "request.json").exists()
+        assert not (root / "cleaned.json").exists()
+    assert not (session_dir / "analysis" / "transcript_clean.json").exists()
+
+
+def test_web_full_clean_prepares_all_chunks_without_marking_failure(config, db):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    outcome = CleanPipeline(config, db, sleep=lambda _: None).run(meta.session_id)
+    assert outcome.partial
+    assert outcome.chunks_processed == 0
+    assert len(outcome.chunks) == 2
+    assert all(item["waiting"] for item in outcome.chunks)
+    assert CleanPipeline(config, db).sessions.load(meta.session_id).steps["clean"].status == "pending"
+    assert not (session_dir / "analysis" / "transcript_clean.json").exists()

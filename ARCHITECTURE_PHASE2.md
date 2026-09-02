@@ -93,8 +93,9 @@ ASR provider/model/options 或 glossary 都会使缓存失效。
 按时间轴切成默认 8 分钟块、30 秒重叠（可配置为 5–10 分钟）。处理分两阶段：
 
 1. `clean_chunk`：每块独立清洗，返回与输入 segment id 对齐的结构化 JSON；
-2. `reconcile_boundary`：只协调相邻块的重叠区，解决重复、断句和术语不一致，不得改写
-   非重叠区。
+2. 本地先比较相邻块重叠区；文本内容相同或仅标点/空白等价时确定性合并；
+3. 只有重叠文本实质冲突时才运行 `reconcile_boundary`，解决重复、断句和术语不一致，
+   不得改写非重叠区。
 
 组装器按稳定 segment id 合并，保留原始 start/end、source layer、source file SHA、
 chunk id、uncertainty 和 visual references。课程 glossary 与 `common.txt` 同时提供给清洗，
@@ -103,8 +104,10 @@ chunk id、uncertainty 和 visual references。课程 glossary 与 `common.txt` 
 ### 4.3 LLM 接口、缓存与失败恢复
 
 `LLMClient` 是 provider-neutral 接口，输入 prompt/messages 与 JSON schema，返回统一的
-文本、provider/model、token usage 和 request id。首个真实实现为 OpenAI；测试实现为
-`FakeLLMClient`。隐私硬闸门 `privacy.allow_cloud_transcript=false` 时拒绝真实云调用。
+文本、provider/model、usage 和 request id。默认真实实现为 `ChatGPTWebClient`：本地输出
+`prompt.md/schema.json/request.json`，人工在 GPT 网页处理后回填 `response.json`；可选
+OpenAI API provider 保留，测试实现为 `FakeLLMClient`。隐私硬闸门
+`privacy.allow_cloud_transcript=false` 时拒绝真实云处理。
 
 Prompt 位于 `prompts/transcript_clean.md`，Python 不硬编码业务提示。每块缓存指纹包含：
 输入层及 SHA、segment ids/text、prompt SHA、glossary SHA、chunk/reconcile 配置、provider、
@@ -116,8 +119,12 @@ model 和 schema 版本。失败按可配置次数指数退避；成功块不会
 - `analysis/transcript_clean.md`
 - `analysis/clean_cache/*.json`
 
-JSON 记录逐块来源、缓存命中、重试次数、token usage、边界协调结果和 provenance。
+JSON 记录逐块来源、缓存命中、重试次数、可用的 token/字符/网页轮次 usage、边界决定和
+provenance。网页版不暴露 token 用量，禁止伪造，改记 input/output chars 与 web turns。
 `--dry-run` 只输出计划和预计块数，不调用 provider、不写业务产物。
+
+Canary 使用 `analysis/canary/chunk_NNN/`，每段隔离保存 `raw.md`、`repaired.md`、
+`cleaned.json`、`cleaned.md` 及网页交换文件；不写正式 `transcript_clean.*`。
 
 ## 5. CLI
 

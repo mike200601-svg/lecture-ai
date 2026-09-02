@@ -219,7 +219,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     report("磁盘空间", free_gb > 5, f"剩余 {free_gb:.1f} GB")
 
     # 隐私
-    report("隐私设置", None,
+    privacy_ready = (
+        not config.privacy.allow_cloud_audio
+        and not config.privacy.allow_cloud_images
+        and config.privacy.allow_cloud_transcript
+    )
+    report("隐私设置", privacy_ready,
            f"云端音频={config.privacy.allow_cloud_audio} · "
            f"云端图片={config.privacy.allow_cloud_images} · "
            f"云端文本={config.privacy.allow_cloud_transcript}")
@@ -227,7 +232,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # Phase 2A 文本清洗。缺 key/SDK 不阻塞 Phase 1，因此记 WARN 而非 FAIL。
     clean_prompt = config.paths.project_root / "prompts" / "transcript_clean.md"
     report("清洗 prompt", clean_prompt.exists(), str(clean_prompt))
-    if config.llm.provider == "openai":
+    if config.llm.provider == "chatgpt_web":
+        report(
+            "文本 LLM",
+            True if config.privacy.allow_cloud_transcript else False,
+            f"chatgpt_web/{config.llm.model} · 网页任务包模式 · 无需 SDK/API key",
+        )
+    elif config.llm.provider == "openai":
         sdk_ready = importlib.util.find_spec("openai") is not None
         key_ready = bool(os.environ.get("OPENAI_API_KEY"))
         state = (
@@ -527,6 +538,29 @@ def cmd_clean(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_clean_canary(args: argparse.Namespace) -> int:
+    """生成或导入隔离的 GPT 网页 Canary，不写正式 CLEANED。"""
+    from lecture_ai.cleaning import CleanPipeline
+
+    config = _bootstrap(args)
+    outcome = CleanPipeline(config).run_canary(
+        args.session_id,
+        chunks=args.chunks,
+        force=args.force,
+    )
+    out(f"✔ {outcome.session_id}  {outcome.message}")
+    for item in outcome.chunks:
+        if "prompt" in item:
+            out(f"  chunk {int(item['index']):03d} prompt   {item['prompt']}")
+            out(f"            response {item['response']}")
+        else:
+            out(
+                f"  chunk {int(item['index']):03d} 已校验 · "
+                f"provider={item.get('provider')} · model={item.get('model')}"
+            )
+    return EXIT_OK
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """长驻监听 incoming 目录。"""
     from lecture_ai.pipeline import Watcher
@@ -631,6 +665,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument("--chunk", type=int, help="只处理指定的 0-based chunk 并写缓存")
     p_clean.add_argument("--force", action="store_true", help="忽略清洗与逐块缓存后重跑")
     p_clean.set_defaults(func=cmd_clean)
+
+    p_canary = sub.add_parser(
+        "clean-canary", help="生成/导入隔离 GPT 网页 Canary（不写正式 CLEANED）"
+    )
+    p_canary.add_argument("session_id")
+    p_canary.add_argument(
+        "--chunks", type=int, nargs="+", default=[2, 5, 9],
+        help="0-based chunk 列表（默认：2 5 9，共约 24 分钟）",
+    )
+    p_canary.add_argument("--force", action="store_true", help="忽略 Canary 缓存重验")
+    p_canary.set_defaults(func=cmd_clean_canary)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,

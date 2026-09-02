@@ -38,6 +38,7 @@ class OpenAILLMClient(LLMClient):
         json_schema: dict[str, Any] | None = None,
         max_tokens: int = 8000,
         temperature: float = 0.2,
+        request_context: dict[str, Any] | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model,

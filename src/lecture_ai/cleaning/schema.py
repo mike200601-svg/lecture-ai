@@ -22,8 +22,24 @@ CLEAN_RESPONSE_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {"type": "string"},
                     },
+                    "corrections": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "original": {"type": "string"},
+                                "corrected": {"type": "string"},
+                                "decision": {"type": "string"},
+                                "reason": {"type": "string"},
+                            },
+                            "required": ["original", "corrected", "decision", "reason"],
+                            "additionalProperties": False,
+                        },
+                    },
                 },
-                "required": ["id", "text", "uncertain", "visual_references"],
+                "required": [
+                    "id", "text", "uncertain", "visual_references", "corrections"
+                ],
                 "additionalProperties": False,
             },
         }
@@ -54,18 +70,27 @@ def validate_clean_response(
     cleaned: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict) or set(item) != {
-            "id", "text", "uncertain", "visual_references"
+            "id", "text", "uncertain", "visual_references", "corrections"
         }:
             raise LLMError("每个清洗 segment 字段必须严格匹配 schema")
         text = item["text"]
         uncertain = item["uncertain"]
         visual = item["visual_references"]
+        corrections = item["corrections"]
         if not isinstance(text, str):
             raise LLMError(f"segment {item['id']} text 必须是字符串")
         if not isinstance(uncertain, list) or not all(isinstance(x, str) for x in uncertain):
             raise LLMError(f"segment {item['id']} uncertain 必须是字符串数组")
         if not isinstance(visual, list) or not all(isinstance(x, str) for x in visual):
             raise LLMError(f"segment {item['id']} visual_references 必须是字符串数组")
+        correction_keys = {"original", "corrected", "decision", "reason"}
+        if not isinstance(corrections, list) or not all(
+            isinstance(value, dict)
+            and set(value) == correction_keys
+            and all(isinstance(value[key], str) for key in correction_keys)
+            for value in corrections
+        ):
+            raise LLMError(f"segment {item['id']} corrections 不符合严格 schema")
         if not text.strip() and not uncertain:
             raise LLMError(
                 f"segment {item['id']} 清洗文本为空时必须在 uncertain 记录原因"
@@ -76,6 +101,7 @@ def validate_clean_response(
                 "text": text.strip(),
                 "uncertain": uncertain,
                 "visual_references": visual,
+                "corrections": corrections,
             }
         )
 

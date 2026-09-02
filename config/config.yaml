@@ -87,8 +87,8 @@ course:
 
 # ---------------------------------------------------------------- Phase 2A 文本 LLM
 llm:
-  provider: openai
-  model: gpt-5.4-mini
+  provider: chatgpt_web                    # chatgpt_web | openai | fake
+  model: chatgpt-web-high                  # 网页端“高”模式；不伪装成 API 模型名
   max_tokens: 8000
   temperature: 0.2
 
@@ -103,7 +103,7 @@ obsidian:
 # ---------------------------------------------------------------- 隐私（硬闸门）
 privacy:
   allow_cloud_audio: false                  # false 时禁止把音频发往云端 ASR
-  allow_cloud_images: true
+  allow_cloud_images: false
   allow_cloud_transcript: true
 
 # ---------------------------------------------------------------- 日志

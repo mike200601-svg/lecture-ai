@@ -131,8 +131,8 @@ class CourseMatchConfig:
 
 @dataclass
 class LLMConfig:
-    provider: str = "openai"
-    model: str = "gpt-5.4-mini"
+    provider: str = "chatgpt_web"
+    model: str = "chatgpt-web-high"
     max_tokens: int = 8000
     temperature: float = 0.2
 
@@ -154,7 +154,7 @@ class PrivacyConfig:
     """隐私开关是硬闸门，不是建议 —— 见 transcription/registry.py。"""
 
     allow_cloud_audio: bool = False
-    allow_cloud_images: bool = True
+    allow_cloud_images: bool = False
     allow_cloud_transcript: bool = True
 
 

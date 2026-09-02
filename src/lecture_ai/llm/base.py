@@ -29,5 +29,6 @@ class LLMClient(ABC):
         json_schema: dict[str, Any] | None = None,
         max_tokens: int = 8000,
         temperature: float = 0.2,
+        request_context: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """返回文本响应；结构化输出仍以 JSON 字符串承载。"""

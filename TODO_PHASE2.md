@@ -1,6 +1,7 @@
 # Phase 1.5 / Phase 2 TODO
 
-> 当前边界：Phase 1.5 已完成；Phase 2A 工程实现完成但等待真实 LLM；Phase 2B/C/D 只设计。
+> 当前边界：Phase 1.5 已完成；Phase 2A 工程实现完成，正在做 GPT 网页 Canary；
+> Phase 2B/C/D 只设计。
 
 ## Phase 1.5 Selective Transcript Repair
 
@@ -21,21 +22,24 @@
 
 - [x] REPAIRED 优先、RAW fallback 与 source layer/SHA provenance
 - [x] 8 分钟核心块 + 前后 30 秒 overlap（配置限制 5–10 分钟）
-- [x] Stage 1 local cleaning + Stage 2 boundary reconciliation
+- [x] Stage 1 清洗 + 条件式 Stage 2 boundary reconciliation
 - [x] 外部 `prompts/transcript_clean.md`
 - [x] common + course glossary 注入
 - [x] provider-neutral `LLMClient`
 - [x] OpenAI Responses API 真实 provider 与结构化 JSON Schema
+- [x] 默认 GPT 网页任务包/response 导入 provider（无需 SDK/API key）
 - [x] FakeLLM、拓扑/长度质量门、时间戳与不确定性保留
 - [x] 每块独立缓存、指数退避、只重跑失败块
 - [x] provider/model/token/elapsed/retry/request id 审计
 - [x] `clean` / `--dry-run` / `--chunk` / `--force`
-- [ ] 安装 `lecture-ai[cloud]` 并在 `.env` 配置 `OPENAI_API_KEY`
-- [ ] 对 Gold Session 真实运行 12 个 chunks + 11 个边界协调
+- [x] `clean-canary` 隔离 RAW/REPAIRED/CLEANED 与网页交换文件
+- [x] 自然边界确定性跳过，只有重叠文本冲突才调用 LLM
+- [ ] 人工回填并验收 Gold Session chunk 02/05/09 三段 Canary
+- [ ] Canary PASS 后对 Gold Session 真实运行 12 个 chunks + 条件边界协调
 - [ ] 按 RAW/REPAIRED/CLEANED 抽查 10 个指定类型窗口
 
-当前停止原因：`WAITING FOR REAL LLM PROVIDER`。禁止用 FakeLLM 生成 Gold Session 的
-`transcript_clean.json`。
+当前停止点：三段 Canary `prompt.md` 已生成，等待 GPT 网页 `response.json`。禁止用
+FakeLLM 生成 Gold Session 的 `transcript_clean.json`。
 
 ## Phase 2B Lecture Structure Detection — NOT IMPLEMENTED
 

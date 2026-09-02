@@ -29,6 +29,7 @@ class FakeLLMClient(LLMClient):
         json_schema: dict[str, Any] | None = None,
         max_tokens: int = 8000,
         temperature: float = 0.2,
+        request_context: dict[str, Any] | None = None,
     ) -> LLMResponse:
         self.calls += 1
         if self.calls <= self.fail_times:
@@ -60,6 +61,7 @@ class FakeLLMClient(LLMClient):
                     "text": str(item.get("text") or item.get("left_text") or ""),
                     "uncertain": list(item.get("uncertain") or []),
                     "visual_references": list(item.get("visual_references") or []),
+                    "corrections": list(item.get("corrections") or []),
                 }
                 for item in items
             ]

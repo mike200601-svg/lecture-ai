@@ -1,6 +1,6 @@
 # STATUS
 
-> 最后更新：2026-09-01
+> 最后更新：2026-09-02
 
 ## 总览
 
@@ -9,12 +9,26 @@
 | Phase 0 | 工程骨架 | ✅ 完成 |
 | Phase 1 | 音频自动转录 MVP | 🟡 真实 95 分钟课堂验收 1/3 完成，待连续两节课验证 |
 | Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
-| Phase 2A | 忠实 Transcript Cleaning | 🟡 工程完成，等待真实 LLM provider |
+| Phase 2A | 忠实 Transcript Cleaning | 🟡 GPT 网页 Canary 已准备，等待人工回填 |
 | Phase 2B/C/D | 结构、知识、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
 | Phase 5 | 课程知识库 | ⬜ 未开始 |
 | Phase 6 | 搜索 / AI 问答 | ⬜ 未开始 |
+
+---
+
+## 2026-09-02：GPT 网页 Canary 与第二节真实录音
+
+- 默认文本 provider 改为 `chatgpt_web/chatgpt-web-high`；无需 OpenAI SDK 或 API key。
+- 新增网页交换适配器、严格 `response.json` 导入、旧 prompt 响应拒绝和字符/网页轮次审计。
+- 相邻块先本地判定：内容相同或标点等价时确定性合并，只有实质文本冲突才调用 LLM。
+- Gold Session 的 chunk 02/05/09（约 24 分钟）已在 `analysis/canary/` 隔离准备；正式
+  `transcript_clean.*` 仍不存在，等待三份 GPT 网页回复后人工质量验收。
+- 隐私硬闸门：云端音频 false、云端图片 false、云端文本 true；doctor 全部关键项 OK。
+- 完整测试：**238 passed**；`pip check` 与 `git diff --check` 通过。
+- 量子力学真实录音 `Recorder - 20260902-0945.m4a` 已由 Syncthing 局域网直连完整同步：
+  100 分 28 秒、AAC、48 kHz、双声道。课表已补周三 09:45，当前本地 medium/CPU 转录中。
 
 ---
 
@@ -38,12 +52,12 @@
 
 - 已实现 REPAIRED 优先/RAW fallback、8 分钟分块 + 30 秒 overlap、两阶段边界协调、
   common + course glossary、严格 JSON Schema、provenance/uncertainty/visual reference 保留。
-- 已实现 provider-neutral `LLMClient`、OpenAI Responses provider、FakeLLM、逐块缓存、
+- 已实现 provider-neutral `LLMClient`、GPT 网页/OpenAI Responses provider、FakeLLM、逐块缓存、
   指数退避、只重跑失败块、token/elapsed/retry/request id 审计。
-- Gold Session dry-run 为 12 chunks；预计完整运行还需 11 个相邻边界协调调用。
-- 当前环境没有 OpenAI SDK、`.env` 或 `OPENAI_API_KEY`。真实运行已正确停止为：
-  `WAITING FOR REAL LLM PROVIDER`；Session 仍为 `TRANSCRIBED`，没有生成 Fake cleaned 产物。
-- 完整测试：**230 passed**（待本轮最终命令复核）。
+- Gold Session dry-run 为 12 chunks；11 个相邻边界先做确定性判定，冲突边界才调用 LLM。
+- 当前默认走 GPT 网页任务包，无需 SDK/API key；Session 仍为 `TRANSCRIBED`，没有生成
+  Fake cleaned 或正式 CLEANED 产物。
+- 完整测试：**238 passed**。
 
 ### Git
 

@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from lecture_ai.errors import ConfigError, LLMError
-from lecture_ai.llm import OpenAILLMClient, build_llm_client
+from lecture_ai.errors import ConfigError, LLMError, WebResponseRequired
+from lecture_ai.llm import ChatGPTWebClient, OpenAILLMClient, build_llm_client
 
 
 class StubResponses:
@@ -67,3 +67,51 @@ def test_unknown_llm_provider_rejected(config):
     config.llm.provider = "crystal_ball"
     with pytest.raises(ConfigError, match="未知"):
         build_llm_client(config)
+
+
+def test_chatgpt_web_client_prepares_exchange_and_imports_response(tmp_path):
+    exchange = tmp_path / "chunk_002"
+    client = ChatGPTWebClient("chatgpt-web-high")
+    context = {"exchange_dir": exchange, "stage": "chunk", "index": 2}
+    with pytest.raises(WebResponseRequired, match="GPT 网页任务已生成"):
+        client.complete(
+            "prompt text", json_schema={"type": "object"},
+            request_context=context,
+        )
+    assert (exchange / "prompt.md").read_text(encoding="utf-8") == "prompt text"
+    assert not (exchange / "response.json").exists()
+
+    (exchange / "response.json").write_text(
+        '```json\n{"segments": []}\n```', encoding="utf-8"
+    )
+    result = client.complete(
+        "prompt text", json_schema={"type": "object"}, request_context=context
+    )
+    assert result.text == '{"segments": []}'
+    assert result.provider == "chatgpt_web"
+    assert result.usage["web_turns"] == 1
+
+
+def test_chatgpt_web_registry_requires_transcript_privacy(config):
+    config.llm.provider = "chatgpt_web"
+    config.privacy.allow_cloud_transcript = False
+    with pytest.raises(ConfigError, match="allow_cloud_transcript"):
+        build_llm_client(config)
+
+
+def test_chatgpt_web_registry_needs_no_api_key(config, monkeypatch):
+    config.llm.provider = "chatgpt_web"
+    config.privacy.allow_cloud_transcript = True
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert isinstance(build_llm_client(config), ChatGPTWebClient)
+
+
+def test_chatgpt_web_rejects_response_for_stale_prompt(tmp_path):
+    exchange = tmp_path / "chunk"
+    client = ChatGPTWebClient()
+    context = {"exchange_dir": exchange, "stage": "chunk", "index": 0}
+    with pytest.raises(WebResponseRequired):
+        client.complete("old prompt", request_context=context)
+    (exchange / "response.json").write_text('{"segments": []}', encoding="utf-8")
+    with pytest.raises(LLMError, match="旧 prompt"):
+        client.complete("new prompt", request_context=context)
