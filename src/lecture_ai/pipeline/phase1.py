@@ -254,9 +254,10 @@ class Phase1Pipeline:
             self.config.glossary_dir, course.glossary, include_common=False
         )
         lw = self.config.transcription.local_whisper
+        hotwords = glossary.as_hotwords() if lw.use_hotwords else None
         options = TranscribeOptions(
             language=lw.language,
-            hotwords=glossary.as_hotwords(),
+            hotwords=hotwords,
             initial_prompt=None,
             vad_filter=lw.vad_filter,
             beam_size=lw.beam_size,
@@ -264,8 +265,13 @@ class Phase1Pipeline:
             repetition_penalty=lw.repetition_penalty,
             no_repeat_ngram_size=lw.no_repeat_ngram_size,
         )
-        if glossary.terms:
+        if hotwords:
             slog.info("已载入 %d 条专业术语用于 ASR 提示", len(glossary))
+        elif glossary.terms:
+            slog.info(
+                "已载入 %d 条专业术语供下游纠错；ASR hotwords 已按实录 A/B 关闭",
+                len(glossary),
+            )
 
         if meta.state == SessionState.AUDIO_READY:
             self.sessions.transition(meta, SessionState.TRANSCRIBING)

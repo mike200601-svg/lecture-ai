@@ -7,9 +7,9 @@
 | Phase | 内容 | 状态 |
 |---|---|---|
 | Phase 0 | 工程骨架 | ✅ 完成 |
-| Phase 1 | 音频自动转录 MVP | 🟡 真实 95 分钟课堂验收 1/3 完成，待连续两节课验证 |
+| Phase 1 | 音频自动转录 MVP | 🟡 连续真实课堂验收 2/3；第二节口音场景仍需 Phase 2 清洗 |
 | Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
-| Phase 2A | 忠实 Transcript Cleaning | 🟡 GPT 网页 Canary 已准备，等待人工回填 |
+| Phase 2A | 忠实 Transcript Cleaning | 🟡 GPT 网页 Canary 2/3 provisional pass；公式块待重做 |
 | Phase 2B/C/D | 结构、知识、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
@@ -21,14 +21,31 @@
 ## 2026-09-02：GPT 网页 Canary 与第二节真实录音
 
 - 默认文本 provider 改为 `chatgpt_web/chatgpt-web-high`；无需 OpenAI SDK 或 API key。
-- 新增网页交换适配器、严格 `response.json` 导入、旧 prompt 响应拒绝和字符/网页轮次审计。
+- 新增网页交换适配器、严格 `response.json` 导入、旧 prompt 响应封存和字符/网页轮次审计。
 - 相邻块先本地判定：内容相同或标点等价时确定性合并，只有实质文本冲突才调用 LLM。
-- Gold Session 的 chunk 02/05/09（约 24 分钟）已在 `analysis/canary/` 隔离准备；正式
-  `transcript_clean.*` 仍不存在，等待三份 GPT 网页回复后人工质量验收。
+- Gold Session 的 chunk 02/05/09（约 24 分钟）已在 `analysis/canary/` 隔离准备；chunk 02
+  与 05 已导入并完成单片 provisional pass。chunk 09 的旧回复虽通过结构校验，但存在依据
+  数学上下文补齐公式 token 的风险，已连同旧 CLEANED/cache 封存；当前仅需重做 chunk 09。
+  正式 `transcript_clean.*` 仍不存在。
 - 隐私硬闸门：云端音频 false、云端图片 false、云端文本 true；doctor 全部关键项 OK。
-- 完整测试：**238 passed**；`pip check` 与 `git diff --check` 通过。
+- 新增 `low_text_density` 与 `prompt_echo` 检测，分别捕获超长低文字片段和词表串入；
+  同时捕获跨多个短 segment 的机械复读。稀疏窗口用 no-hotwords/no-VAD 隔离恢复，
+  并审计剔除连续短占位幻觉；恢复结果出现新异常时拒绝替换。
+- 三段量子力学 A/B 证明：ASR hotwords 会在弱语音处背诵术语表；默认已关闭 hotwords，
+  glossary 继续供 Phase 2 忠实纠错使用。
 - 量子力学真实录音 `Recorder - 20260902-0945.m4a` 已由 Syncthing 局域网直连完整同步：
-  100 分 28 秒、AAC、48 kHz、双声道。课表已补周三 09:45，当前本地 medium/CPU 转录中。
+  100 分 28 秒、AAC、48 kHz、双声道。本地 medium/CPU 产出 1625 段，耗时 2636.34 秒
+  （2.286x 实时）；4 个异常 segments 合并为 3 个窗口，3/3 修复接受，229.67 秒可疑
+  时长降至 0，当前 schema v4 产物为 1639 段，选择性 ASR 额外耗时 94.27 秒。
+- 数字电路开头隔离复核确认：录音前约 146 秒主要是候课环境声；原 ASR 首句时间戳提前，
+  且漏掉两句正式开课话语。Gold 正式 REPAIRED 暂不覆写，以免使正在进行的 Canary 失效。
+- Canary chunk 02 的本地质量门额外恢复 3 条照片引用、清除 9 个连续重复副本并去重
+  correction audit；chunk 05 的 132 个 segments、2048 → 2180 字也通过单片评估。
+- chunk 09 已加入条件式 `formula-token-lock-v1`：公式/数值有歧义时必须保留原文并写
+  `uncertain`。本地又对约 311 秒公式原声做 no-VAD 隔离转录，确认幂展开与 `2A.7F`
+  确有连续语音证据；但 `173 ÷ 2` 的商仍被两次 ASR 识别为 80，不能静默改成 86。
+- 完整测试：**252 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
+  medium/large-v3-turbo 缓存 partial 与无 CUDA 均为已知 WARN；配置中的本地 medium READY。
 
 ---
 
@@ -103,8 +120,9 @@ Phase 2B/C/D **NOT IMPLEMENTED**。设计与测试计划见 `ARCHITECTURE_PHASE2
 - 荣耀录音机将封口/结束时间写入 `creation_time`。已增加“容器时间接近
   文件名起点 + duration 时改用文件名”的规则；本次校正为 09:43 开始。
 - 原始转录有 19 个高重复可疑段（10.26% 时长）。尾段 A/B 将最大文本压缩率
-  从 29.73 降至 1.43；已改为仅用课程专属 hotwords，并启用
-  `repetition_penalty: 1.1` + `no_repeat_ngram_size: 3`。
+  从 29.73 降至 1.43；当时先收窄为课程专属 hotwords，并启用
+  `repetition_penalty: 1.1` + `no_repeat_ngram_size: 3`。后续量子课 A/B 进一步证明课程专属
+  hotwords 仍会串入，因此当前默认已完全关闭 ASR hotwords。
 - 录音峰值 -4.2 dBFS、无削波，典型语音与安静背景差约 15.46 dB。
   结论为录音可用，无需购买物理降噪设备，不建议默认强降噪。
 

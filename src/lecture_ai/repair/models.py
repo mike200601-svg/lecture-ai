@@ -15,6 +15,10 @@ class TextMetrics:
     repeated_ngram_ratio: float
     longest_run: int
     no_speech_mean: float | None
+    duration_sec: float | None
+    characters_per_second: float | None
+    prompt_echo_terms: int
+    prompt_echo_coverage: float
     anomaly_score: float
     suspicious: bool
     reasons: tuple[str, ...] = ()

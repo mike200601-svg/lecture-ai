@@ -89,6 +89,10 @@ python -m lecture_ai clean-canary <session_id> --chunks 2 5 9
 - `transcript_raw.md` —— 人类可读版，`[00:24:12] 文本` 逐行
 - `transcript_repaired.json/.md` —— Phase 1.5 选择性重转录结果与逐窗决策历史
 
+当前本地 Whisper 默认关闭 ASR `hotwords`：真实口音课堂 A/B 发现长词表会在弱语音处
+直接串入术语。glossary 仍保留给 Phase 2 纠错。`repair` 会同时检测复读、超长低文字
+密度和 glossary prompt 串入；稀疏恢复产生的新异常会被拒绝并完整留痕。
+
 Phase 2A 产物在同一 Session 的 `analysis/`：
 
 - `transcript_clean.json` —— 正式机器输入，保留时间戳、source SHA、chunk 与 uncertainty
@@ -99,6 +103,9 @@ Phase 2A 产物在同一 Session 的 `analysis/`：
 默认 `llm.provider=chatgpt_web`：运行 `clean-canary` 后，把每个 `prompt.md` 分别粘贴到
 GPT 网页的新对话，将严格 JSON 回复保存为同目录 `response.json`，再运行同一命令完成
 schema/拓扑/长度校验并生成 `cleaned.json/.md`。Canary 通过前禁止生成 Gold 正式 CLEANED。
+含公式、指数、变量或数制的块会自动加入数值忠实护栏：原转录不明确时保留原文并写
+`uncertain`，不能靠计算结果补公式。prompt 更新时旧 response/cache/CLEANED 会改名封存，
+不会静默覆盖，也不会被误当成当前结果。
 可选 `openai` API provider 仍保留，只有使用它时才从 `.env` 读取 `OPENAI_API_KEY`。
 
 ### 5. 手机自动同步（当前正式方案）

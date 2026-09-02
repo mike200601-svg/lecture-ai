@@ -51,6 +51,7 @@ class LocalWhisperConfig:
     beam_size: int = 5
     vad_filter: bool = True
     language: str | None = "zh"
+    use_hotwords: bool = False
     condition_on_previous_text: bool = False
     repetition_penalty: float = 1.1
     no_repeat_ngram_size: int = 3
@@ -107,6 +108,10 @@ class RepairConfig:
     unique_char_ratio_threshold: float = 0.16
     repeated_ngram_ratio_threshold: float = 0.55
     longest_run_threshold: int = 6
+    sparse_segment_min_seconds: float = 45.0
+    sparse_segment_max_chars_per_second: float = 0.60
+    prompt_echo_min_terms: int = 5
+    prompt_echo_min_coverage: float = 0.55
     min_improvement_ratio: float = 0.20
     min_length_ratio: float = 0.05
 
@@ -121,6 +126,7 @@ class CleanConfig:
     retry_base_seconds: float = 1.0
     min_retention_ratio: float = 0.45
     max_expansion_ratio: float = 1.35
+    cross_segment_repetition_threshold: int = 6
 
 
 @dataclass

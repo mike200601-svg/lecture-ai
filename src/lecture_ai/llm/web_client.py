@@ -54,6 +54,16 @@ class ChatGPTWebClient(LLMClient):
                 previous_prompt_sha = str(previous.get("prompt_sha256") or "") or None
             except (OSError, json.JSONDecodeError):
                 previous_prompt_sha = None
+        stale_response_path: Path | None = None
+        if (
+            response_path.exists()
+            and previous_prompt_sha
+            and previous_prompt_sha != prompt_sha
+        ):
+            stale_response_path = _archive_stale_response(
+                response_path,
+                previous_prompt_sha,
+            )
         atomic_write_text(prompt_path, prompt)
         atomic_write_text(
             schema_path,
@@ -77,17 +87,16 @@ class ChatGPTWebClient(LLMClient):
                 indent=2,
             ),
         )
+        if stale_response_path is not None:
+            raise WebResponseRequired(
+                f"prompt 已更新；旧响应已保留为 {stale_response_path}。"
+                f"请用当前 prompt.md 重新生成并保存为 {response_path}"
+            )
         if not response_path.exists():
             raise WebResponseRequired(
                 f"GPT 网页任务已生成：{prompt_path}；"
                 f"请把网页返回的严格 JSON 保存为 {response_path}"
             )
-        if previous_prompt_sha and previous_prompt_sha != prompt_sha:
-            raise LLMError(
-                f"GPT 网页 response.json 对应旧 prompt：{response_path}；"
-                "请用当前 prompt.md 重新生成并覆盖响应"
-            )
-
         text = response_path.read_text(encoding="utf-8").strip()
         text = _strip_single_json_fence(text)
         if not text:
@@ -119,3 +128,16 @@ def _strip_single_json_fence(text: str) -> str:
     if lines[0].strip().lower() not in {"```", "```json"}:
         return stripped
     return "\n".join(lines[1:-1]).strip()
+
+
+def _archive_stale_response(response_path: Path, prompt_sha: str) -> Path:
+    """保留旧网页响应，避免 prompt 更新后误导入或静默覆盖。"""
+    response_sha = hashlib.sha256(response_path.read_bytes()).hexdigest()
+    stem = f"response.stale.{prompt_sha[:12]}.{response_sha[:12]}"
+    candidate = response_path.with_name(stem + ".json")
+    suffix = 1
+    while candidate.exists():
+        candidate = response_path.with_name(f"{stem}.{suffix}.json")
+        suffix += 1
+    response_path.rename(candidate)
+    return candidate

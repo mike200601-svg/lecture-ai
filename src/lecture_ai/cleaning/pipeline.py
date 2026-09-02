@@ -12,7 +12,11 @@ from typing import Any, Callable
 from lecture_ai.cleaning.chunking import build_chunk_plan
 from lecture_ai.cleaning.boundary import decide_boundary
 from lecture_ai.cleaning.models import ChunkPlan, CleanOutcome
-from lecture_ai.cleaning.prompting import load_clean_prompt, render_clean_prompt
+from lecture_ai.cleaning.prompting import (
+    clean_prompt_policy_key,
+    load_clean_prompt,
+    render_clean_prompt,
+)
 from lecture_ai.cleaning.schema import CLEAN_RESPONSE_SCHEMA, validate_clean_response
 from lecture_ai.config import Config
 from lecture_ai.database import Database
@@ -28,7 +32,7 @@ from lecture_ai.utils.timefmt import hhmmss, now_local, to_iso
 
 CLEAN_JSON = "transcript_clean.json"
 CLEAN_MD = "transcript_clean.md"
-CLEAN_SCHEMA_VERSION = 1
+CLEAN_SCHEMA_VERSION = 2
 STEP_CLEAN = "clean"
 
 
@@ -374,6 +378,7 @@ class CleanPipeline:
                     exchange_dir=canary_dir,
                 )
             except WebResponseRequired as exc:
+                self._archive_stale_canary_outputs(canary_dir)
                 pending.append(
                     {
                         "index": index,
@@ -418,6 +423,23 @@ class CleanPipeline:
             message=message,
             chunks=[self._record_audit(record) for record in records] + pending,
         )
+
+    @staticmethod
+    def _archive_stale_canary_outputs(canary_dir: Path) -> None:
+        """网页任务待重做时封存旧结果，避免把旧 CLEANED 误认成当前结果。"""
+        for name in ("cache.json", "cleaned.json", "cleaned.md"):
+            path = canary_dir / name
+            if not path.exists():
+                continue
+            digest = sha256_file(path)[:12]
+            candidate = path.with_name(f"{path.stem}.stale.{digest}{path.suffix}")
+            suffix = 1
+            while candidate.exists():
+                candidate = path.with_name(
+                    f"{path.stem}.stale.{digest}.{suffix}{path.suffix}"
+                )
+                suffix += 1
+            path.rename(candidate)
 
     @staticmethod
     def _select_source(session_dir: Path) -> tuple[Path, str]:
@@ -526,7 +548,9 @@ class CleanPipeline:
             glossary=glossary,
             segments=inputs,
         )
-        key = self._call_key(fingerprint, "chunk", plan.index, inputs)
+        policy_key = clean_prompt_policy_key(inputs)
+        call_fingerprint = f"{fingerprint}:{policy_key}" if policy_key else fingerprint
+        key = self._call_key(call_fingerprint, "chunk", plan.index, inputs)
         path = cache_path or (
             session_dir / "analysis" / "clean_cache" / f"chunk_{plan.index:03d}.json"
         )

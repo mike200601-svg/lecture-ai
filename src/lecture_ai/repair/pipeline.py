@@ -18,7 +18,7 @@ from lecture_ai.repair.detector import (
     detect_suspicious_regions,
     measure_segments,
 )
-from lecture_ai.repair.models import RepairOutcome, SuspiciousRegion
+from lecture_ai.repair.models import RepairDecision, RepairOutcome, SuspiciousRegion
 from lecture_ai.session import SessionManager, load_courses
 from lecture_ai.transcription import (
     TranscribeOptions,
@@ -35,7 +35,7 @@ from lecture_ai.utils.timefmt import hhmmss, now_local, to_iso
 REPAIRED_JSON = "transcript_repaired.json"
 REPAIRED_MD = "transcript_repaired.md"
 REPAIR_CACHE = "repair_cache.json"
-REPAIR_SCHEMA_VERSION = 1
+REPAIR_SCHEMA_VERSION = 4
 STEP_REPAIR = "repair"
 
 ClipExtractor = Callable[[Path, Path, float, float], Path]
@@ -112,15 +112,21 @@ class RepairPipeline:
         if duration <= 0:
             duration = max((segment.end for segment in segments), default=0.0)
 
+        glossary = self._glossary(meta.course.key, include_common=False)
+        detection_glossary = self._glossary(meta.course.key, include_common=True)
         regions = detect_suspicious_regions(
-            segments, self.config.repair, duration_sec=duration
+            segments,
+            self.config.repair,
+            duration_sec=duration,
+            suspicious_terms=detection_glossary.terms,
         )
         if region is not None:
             regions = self._select_region(regions, segments, region, duration)
         detected_count = sum(len(item.segment_ids) for item in regions)
 
-        glossary = self._glossary(meta.course.key)
-        fingerprint = self._fingerprint(raw_sha, glossary.terms, region)
+        fingerprint = self._fingerprint(
+            raw_sha, glossary.terms, detection_glossary.terms, region
+        )
         output_json = transcript_dir / REPAIRED_JSON
         output_md = transcript_dir / REPAIRED_MD
         previous_asr_elapsed = self._previous_asr_elapsed(
@@ -178,7 +184,8 @@ class RepairPipeline:
                 if force
                 else self._load_cache(cache_path, fingerprint, raw_sha)
             )
-            options = self._transcribe_options(glossary.as_hotwords())
+            lw = self.config.transcription.local_whisper
+            default_hotwords = glossary.as_hotwords() if lw.use_hotwords else None
             history: list[dict[str, Any]] = []
 
             if regions:
@@ -219,14 +226,40 @@ class RepairPipeline:
                     item.window_start,
                     item.window_end,
                 )
+                options, asr_strategy = self._region_transcribe_options(
+                    item, default_hotwords
+                )
                 result: TranscriptResult = transcriber.transcribe(clip, options)
                 replacement = self._offset_result(result, item.window_start, item.window_end)
+                dropped_repetition: list[TranscriptSegment] = []
+                if "low_text_density" in item.reasons:
+                    replacement, dropped_repetition = self._drop_short_repetition_runs(
+                        replacement,
+                        min_run=self.config.repair.longest_run_threshold,
+                    )
                 original = self._segments_in_window(
                     segments, item.window_start, item.window_end
                 )
-                before = measure_segments(original, self.config.repair)
-                after = measure_segments(replacement, self.config.repair)
+                before = measure_segments(
+                    original,
+                    self.config.repair,
+                    suspicious_terms=detection_glossary.terms,
+                )
+                after = measure_segments(
+                    replacement,
+                    self.config.repair,
+                    suspicious_terms=detection_glossary.terms,
+                )
                 decision = decide_repair(before, after, self.config.repair)
+                new_reasons = sorted(
+                    set(after.reasons) - set(before.reasons) - set(item.reasons)
+                )
+                if decision.accepted and new_reasons:
+                    decision = RepairDecision(
+                        False,
+                        "replacement_new_anomaly:" + ",".join(new_reasons),
+                        0.0,
+                    )
                 record = {
                     **item.to_dict(),
                     "before_metrics": before.to_dict(),
@@ -236,6 +269,12 @@ class RepairPipeline:
                     "replacement_segments": [segment.to_dict() for segment in replacement],
                     "original_text": " ".join(segment.text for segment in original),
                     "repaired_text": " ".join(segment.text for segment in replacement),
+                    "asr_strategy": asr_strategy,
+                    "sanitization": {
+                        "dropped_short_repetition_segments": [
+                            segment.to_dict() for segment in dropped_repetition
+                        ],
+                    },
                     "asr_elapsed_sec": float(result.extra.get("elapsed_sec") or 0.0),
                     "cache_hit": False,
                 }
@@ -254,6 +293,7 @@ class RepairPipeline:
                 raw_sha=raw_sha,
                 fingerprint=fingerprint,
                 glossary_sources=glossary.sources,
+                detection_terms=detection_glossary.terms,
                 elapsed_sec=time.monotonic() - started,
                 previous_asr_elapsed=previous_asr_elapsed,
             )
@@ -315,23 +355,75 @@ class RepairPipeline:
             raise RepairError(f"预处理音频不存在：{path}")
         return path
 
-    def _glossary(self, course_key: str):
+    def _glossary(self, course_key: str, *, include_common: bool):
         course = self.courses.get(course_key)
         return load_glossary(
-            self.config.glossary_dir, course.glossary, include_common=False
+            self.config.glossary_dir,
+            course.glossary,
+            include_common=include_common,
         )
 
-    def _transcribe_options(self, hotwords: str | None) -> TranscribeOptions:
+    def _transcribe_options(
+        self,
+        hotwords: str | None,
+        *,
+        vad_filter: bool | None = None,
+    ) -> TranscribeOptions:
         lw = self.config.transcription.local_whisper
         return TranscribeOptions(
             language=lw.language,
             hotwords=hotwords,
-            vad_filter=lw.vad_filter,
+            vad_filter=lw.vad_filter if vad_filter is None else vad_filter,
             beam_size=lw.beam_size,
             condition_on_previous_text=lw.condition_on_previous_text,
             repetition_penalty=lw.repetition_penalty,
             no_repeat_ngram_size=lw.no_repeat_ngram_size,
         )
+
+    def _region_transcribe_options(
+        self,
+        region: SuspiciousRegion,
+        default_hotwords: str | None,
+    ) -> tuple[TranscribeOptions, str]:
+        reasons = set(region.reasons)
+        if "low_text_density" in reasons:
+            return (
+                self._transcribe_options(None, vad_filter=False),
+                "sparse_recovery_no_hotwords_no_vad",
+            )
+        if "prompt_echo" in reasons:
+            return self._transcribe_options(None), "prompt_echo_recovery_no_hotwords"
+        strategy = "default_hotwords" if default_hotwords else "default_no_hotwords"
+        return self._transcribe_options(default_hotwords), strategy
+
+    @staticmethod
+    def _drop_short_repetition_runs(
+        segments: list[TranscriptSegment],
+        *,
+        min_run: int,
+    ) -> tuple[list[TranscriptSegment], list[TranscriptSegment]]:
+        """去掉 no-VAD 恢复中连续生成的单字/短词占位幻觉，并完整留痕。"""
+        kept: list[TranscriptSegment] = []
+        dropped: list[TranscriptSegment] = []
+        index = 0
+        threshold = max(2, int(min_run))
+        while index < len(segments):
+            text = segments[index].text.strip().lower()
+            end = index + 1
+            while end < len(segments) and segments[end].text.strip().lower() == text:
+                end += 1
+            run = segments[index:end]
+            short_placeholder = (
+                len(text) <= 4
+                and len(run) >= threshold
+                and all(segment.end - segment.start <= 5.0 for segment in run)
+            )
+            if short_placeholder:
+                dropped.extend(run)
+            else:
+                kept.extend(run)
+            index = end
+        return kept, dropped
 
     def _get_transcriber(self):
         if self._transcriber is None:
@@ -342,6 +434,7 @@ class RepairPipeline:
         self,
         raw_sha: dict[str, str],
         glossary_terms: list[str],
+        detection_terms: list[str],
         selected_region: int | tuple[float, float] | None,
     ) -> str:
         data = {
@@ -351,6 +444,7 @@ class RepairPipeline:
             "provider": self.config.transcription.provider,
             "local_whisper": asdict(self.config.transcription.local_whisper),
             "glossary_terms": glossary_terms,
+            "detection_terms": detection_terms,
             "selected_region": selected_region,
         }
         canonical = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -503,6 +597,7 @@ class RepairPipeline:
         raw_sha: dict[str, str],
         fingerprint: str,
         glossary_sources: list[str],
+        detection_terms: list[str],
         elapsed_sec: float,
         previous_asr_elapsed: float,
     ) -> dict[str, Any]:
@@ -510,12 +605,17 @@ class RepairPipeline:
             bool(record.get("decision", {}).get("accepted")) for record in history
         )
         original = [TranscriptSegment.from_dict(item) for item in payload["segments"]]
-        before = measure_segments(original, self.config.repair)
-        after = measure_segments(repaired, self.config.repair)
+        before = measure_segments(
+            original, self.config.repair, suspicious_terms=detection_terms
+        )
+        after = measure_segments(
+            repaired, self.config.repair, suspicious_terms=detection_terms
+        )
         remaining = detect_suspicious_regions(
             repaired,
             self.config.repair,
             duration_sec=float(payload.get("duration_sec") or 0.0),
+            suspicious_terms=detection_terms,
         )
         detected_segment_ids = sorted({
             int(segment_id)
@@ -538,11 +638,21 @@ class RepairPipeline:
             if 0 <= index < len(repaired)
         )
         original_max_compression = max(
-            (measure_segments([segment], self.config.repair).compression_ratio for segment in original),
+            (
+                measure_segments(
+                    [segment], self.config.repair, suspicious_terms=detection_terms
+                ).compression_ratio
+                for segment in original
+            ),
             default=0.0,
         )
         final_max_compression = max(
-            (measure_segments([segment], self.config.repair).compression_ratio for segment in repaired),
+            (
+                measure_segments(
+                    [segment], self.config.repair, suspicious_terms=detection_terms
+                ).compression_ratio
+                for segment in repaired
+            ),
             default=0.0,
         )
         provider, model = self._provider_model(self._transcriber)

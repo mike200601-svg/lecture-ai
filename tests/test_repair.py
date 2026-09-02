@@ -110,6 +110,99 @@ def test_detector_merges_overlapping_padded_windows(config):
     assert regions[0].window_end == 50
 
 
+def test_detector_flags_long_segment_with_too_little_text(config):
+    segments = [
+        TranscriptSegment(
+            9.01,
+            179.38,
+            "上课之前我先做一下自我介绍，我是信息学院的老师。",
+            no_speech_prob=0.70,
+        ),
+        TranscriptSegment(179.38, 187.38, "这里是我的联系方式。"),
+    ]
+
+    regions = detect_suspicious_regions(
+        segments, config.repair, duration_sec=200
+    )
+
+    assert len(regions) == 1
+    assert regions[0].segment_ids == [0]
+    assert "low_text_density" in regions[0].reasons
+    assert regions[0].original_metrics.characters_per_second < 0.6
+
+
+def test_detector_flags_glossary_prompt_echo(config):
+    terms = [
+        "薛定谔方程", "Schrodinger", "波函数", "概率密度", "玻恩", "厄米算符",
+    ]
+    segments = [
+        TranscriptSegment(
+            60,
+            72,
+            "薛定谔方程 Schrodinger 波函数 概率密度 玻恩 厄米算符",
+        )
+    ]
+
+    regions = detect_suspicious_regions(
+        segments,
+        config.repair,
+        duration_sec=100,
+        suspicious_terms=terms,
+    )
+
+    assert len(regions) == 1
+    assert "prompt_echo" in regions[0].reasons
+    assert regions[0].original_metrics.prompt_echo_terms == 6
+    assert regions[0].original_metrics.prompt_echo_coverage > 0.9
+
+
+def test_detector_flags_repetition_split_across_short_segments(config):
+    segments = [
+        TranscriptSegment(index * 3, index * 3 + 3, "巴丁、布拉顿")
+        for index in range(config.repair.longest_run_threshold + 1)
+    ]
+
+    regions = detect_suspicious_regions(
+        segments, config.repair, duration_sec=30
+    )
+
+    assert len(regions) == 1
+    assert len(regions[0].segment_ids) == config.repair.longest_run_threshold + 1
+    assert "cross_segment_repetition" in regions[0].reasons
+
+
+def test_sparse_recovery_disables_hotwords_and_vad(config, db):
+    pipeline = RepairPipeline(config, db, transcriber=CountingTranscriber())
+    region = detect_suspicious_regions(
+        [TranscriptSegment(0, 120, "只有一句很短的课堂文字。")],
+        config.repair,
+        duration_sec=120,
+    )[0]
+
+    options, strategy = pipeline._region_transcribe_options(
+        region, "波函数 薛定谔方程"
+    )
+
+    assert options.hotwords is None
+    assert options.vad_filter is False
+    assert strategy == "sparse_recovery_no_hotwords_no_vad"
+
+
+def test_sparse_recovery_drops_repeated_short_placeholders(config, db):
+    pipeline = RepairPipeline(config, db, transcriber=CountingTranscriber())
+    segments = [
+        TranscriptSegment(index * 2, index * 2 + 2, "嗯")
+        for index in range(config.repair.longest_run_threshold + 2)
+    ] + [TranscriptSegment(30, 34, "好，我们开始上课。")]
+
+    kept, dropped = pipeline._drop_short_repetition_runs(
+        segments, min_run=config.repair.longest_run_threshold
+    )
+
+    assert [segment.text for segment in kept] == ["好，我们开始上课。"]
+    assert len(dropped) == config.repair.longest_run_threshold + 2
+
+
 def test_merge_replaces_only_accepted_window_and_keeps_timeline():
     original = [
         TranscriptSegment(0, 5, "before"),

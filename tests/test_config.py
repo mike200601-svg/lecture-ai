@@ -25,6 +25,7 @@ def test_defaults_applied_for_missing_sections(project_root):
     )
     cfg = load_config(project_root / "config" / "config.yaml", project_root=project_root)
     assert cfg.transcription.provider == "local_whisper"
+    assert cfg.transcription.local_whisper.use_hotwords is False
     assert cfg.audio.target_sample_rate == 16000
     assert cfg.privacy.allow_cloud_audio is False
 

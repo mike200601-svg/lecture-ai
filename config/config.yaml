@@ -29,6 +29,7 @@ transcription:
     beam_size: 5
     vad_filter: true                        # 过滤长静音，显著提速
     language: zh                            # null = 自动检测；中文课堂建议锁定 zh
+    use_hotwords: false                     # 实录 A/B：长词表会在弱语音处诱发术语串入；术语留给 Phase 2 纠错
     condition_on_previous_text: false       # 防长音频复读
     repetition_penalty: 1.1                 # 轻度惩罚重复 token（真实课堂 A/B 验证）
     no_repeat_ngram_size: 3                 # 禁止 3-gram 无限循环
@@ -68,6 +69,10 @@ repair:
   unique_char_ratio_threshold: 0.16
   repeated_ngram_ratio_threshold: 0.55
   longest_run_threshold: 6
+  sparse_segment_min_seconds: 45            # 超长片段却几乎无文字：疑似 VAD/ASR 漏识
+  sparse_segment_max_chars_per_second: 0.60
+  prompt_echo_min_terms: 5                  # 连续命中大量词表词且文本大部被其覆盖：疑似 prompt 串入
+  prompt_echo_min_coverage: 0.55
   min_improvement_ratio: 0.20              # 新窗口异常分数至少下降 20%
   min_length_ratio: 0.05                   # 防止用近空结果替换有声内容
 
@@ -79,6 +84,7 @@ clean:
   retry_base_seconds: 1.0
   min_retention_ratio: 0.45                 # 防止清洗偷偷变成摘要
   max_expansion_ratio: 1.35                 # 防止模型扩写/注入外部知识
+  cross_segment_repetition_threshold: 6     # 连续完全相同短片段只保留首条，其余审计删除
 
 # ---------------------------------------------------------------- 课程
 course:

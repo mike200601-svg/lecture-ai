@@ -41,11 +41,49 @@ def _longest_consecutive_run(text: str) -> int:
     return best
 
 
+def _prompt_echo_stats(text: str, terms: Iterable[str]) -> tuple[int, float]:
+    """统计词表在文本中的命中数和字符覆盖率，识别弱语音处的 prompt 串入。"""
+    compact = _normalized(text)
+    if not compact:
+        return 0, 0.0
+
+    matched = 0
+    spans: list[tuple[int, int]] = []
+    seen: set[str] = set()
+    for raw_term in terms:
+        term = _normalized(raw_term)
+        if len(term) < 2 or term in seen:
+            continue
+        seen.add(term)
+        start = 0
+        found = False
+        while True:
+            index = compact.find(term, start)
+            if index < 0:
+                break
+            found = True
+            spans.append((index, index + len(term)))
+            start = index + len(term)
+        if found:
+            matched += 1
+
+    covered = 0
+    end = 0
+    for left, right in sorted(spans):
+        if right <= end:
+            continue
+        covered += right - max(left, end)
+        end = right
+    return matched, covered / max(1, len(compact))
+
+
 def measure_text(
     text: str,
     config: RepairConfig,
     *,
     no_speech_values: Iterable[float | None] = (),
+    duration_sec: float | None = None,
+    suspicious_terms: Iterable[str] = (),
 ) -> TextMetrics:
     compact = _normalized(text)
     payload = compact.encode("utf-8")
@@ -61,6 +99,13 @@ def measure_text(
 
     speech = [float(value) for value in no_speech_values if value is not None]
     no_speech_mean = sum(speech) / len(speech) if speech else None
+    duration = max(0.0, float(duration_sec)) if duration_sec is not None else None
+    chars_per_second = (
+        len(compact) / duration if duration is not None and duration > 0 else None
+    )
+    prompt_echo_terms, prompt_echo_coverage = _prompt_echo_stats(
+        text, suspicious_terms
+    )
 
     reasons: list[str] = []
     if len(payload) >= config.min_text_bytes:
@@ -72,6 +117,18 @@ def measure_text(
             reasons.append("repeated_ngrams")
         if longest_run >= config.longest_run_threshold:
             reasons.append("consecutive_repetition")
+    if (
+        duration is not None
+        and duration >= config.sparse_segment_min_seconds
+        and chars_per_second is not None
+        and chars_per_second <= config.sparse_segment_max_chars_per_second
+    ):
+        reasons.append("low_text_density")
+    if (
+        prompt_echo_terms >= config.prompt_echo_min_terms
+        and prompt_echo_coverage >= config.prompt_echo_min_coverage
+    ):
+        reasons.append("prompt_echo")
 
     score = (
         max(0.0, compression_ratio / config.compression_ratio_threshold - 1.0)
@@ -80,6 +137,21 @@ def measure_text(
         + max(0.0, repeated_ngram_ratio / config.repeated_ngram_ratio_threshold - 1.0)
         + max(0.0, longest_run / max(1, config.longest_run_threshold) - 1.0)
     )
+    if "low_text_density" in reasons:
+        score += 1.0 + min(
+            4.0,
+            max(
+                0.0,
+                config.sparse_segment_max_chars_per_second
+                / max(0.01, chars_per_second or 0.0)
+                - 1.0,
+            ),
+        )
+    if "prompt_echo" in reasons:
+        score += 1.0 + max(
+            0.0,
+            prompt_echo_coverage / max(0.01, config.prompt_echo_min_coverage) - 1.0,
+        )
     return TextMetrics(
         character_count=len(compact),
         utf8_bytes=len(payload),
@@ -88,18 +160,35 @@ def measure_text(
         repeated_ngram_ratio=round(repeated_ngram_ratio, 4),
         longest_run=longest_run,
         no_speech_mean=round(no_speech_mean, 4) if no_speech_mean is not None else None,
+        duration_sec=round(duration, 3) if duration is not None else None,
+        characters_per_second=(
+            round(chars_per_second, 4) if chars_per_second is not None else None
+        ),
+        prompt_echo_terms=prompt_echo_terms,
+        prompt_echo_coverage=round(prompt_echo_coverage, 4),
         anomaly_score=round(score, 4),
         suspicious=bool(reasons),
         reasons=tuple(reasons),
     )
 
 
-def measure_segments(segments: Iterable[TranscriptSegment], config: RepairConfig) -> TextMetrics:
+def measure_segments(
+    segments: Iterable[TranscriptSegment],
+    config: RepairConfig,
+    *,
+    suspicious_terms: Iterable[str] = (),
+) -> TextMetrics:
     items = list(segments)
+    duration = (
+        max(segment.end for segment in items) - min(segment.start for segment in items)
+        if items else None
+    )
     return measure_text(
         " ".join(segment.text for segment in items),
         config,
         no_speech_values=(segment.no_speech_prob for segment in items),
+        duration_sec=duration,
+        suspicious_terms=suspicious_terms,
     )
 
 
@@ -108,11 +197,13 @@ def detect_suspicious_regions(
     config: RepairConfig,
     *,
     duration_sec: float,
+    suspicious_terms: Iterable[str] = (),
 ) -> list[SuspiciousRegion]:
+    terms = tuple(suspicious_terms)
     candidates: list[SuspiciousRegion] = []
     padding = max(0.0, float(config.padding_seconds))
     for index, segment in enumerate(segments):
-        metrics = measure_segments([segment], config)
+        metrics = measure_segments([segment], config, suspicious_terms=terms)
         if not metrics.suspicious:
             continue
         candidates.append(
@@ -129,14 +220,43 @@ def detect_suspicious_regions(
             )
         )
 
+    # 单个短 segment 可能低于 min_text_bytes，但跨多个相邻片段机械重复仍是典型幻觉。
+    index = 0
+    while index < len(segments):
+        key = _normalized(segments[index].text)
+        end = index + 1
+        while (
+            key
+            and end < len(segments)
+            and _normalized(segments[end].text) == key
+        ):
+            end += 1
+        if key and end - index >= config.longest_run_threshold:
+            run = segments[index:end]
+            metrics = measure_segments(run, config, suspicious_terms=terms)
+            candidates.append(
+                SuspiciousRegion(
+                    region_id=len(candidates),
+                    start=run[0].start,
+                    end=run[-1].end,
+                    window_start=max(0.0, run[0].start - padding),
+                    window_end=min(duration_sec, run[-1].end + padding),
+                    segment_ids=list(range(index, end)),
+                    reasons=sorted(set(metrics.reasons + ("cross_segment_repetition",))),
+                    original_metrics=metrics,
+                    text_preview=" … ".join(segment.text for segment in run)[:320],
+                )
+            )
+        index = end
+
     merged: list[SuspiciousRegion] = []
-    for candidate in candidates:
+    for candidate in sorted(candidates, key=lambda item: (item.window_start, item.window_end)):
         if merged and candidate.window_start <= merged[-1].window_end:
             current = merged[-1]
             current.start = min(current.start, candidate.start)
             current.end = max(current.end, candidate.end)
             current.window_end = max(current.window_end, candidate.window_end)
-            current.segment_ids.extend(candidate.segment_ids)
+            current.segment_ids = sorted(set(current.segment_ids + candidate.segment_ids))
             current.reasons = sorted(set(current.reasons + candidate.reasons))
             current.text_preview = (current.text_preview + " … " + candidate.text_preview)[:320]
             continue
@@ -149,7 +269,9 @@ def detect_suspicious_regions(
             segment for segment in segments
             if segment.end > region.window_start and segment.start < region.window_end
         ]
-        region.original_metrics = measure_segments(window_segments, config)
+        region.original_metrics = measure_segments(
+            window_segments, config, suspicious_terms=terms
+        )
     return merged
 
 

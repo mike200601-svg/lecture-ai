@@ -113,5 +113,7 @@ def test_chatgpt_web_rejects_response_for_stale_prompt(tmp_path):
     with pytest.raises(WebResponseRequired):
         client.complete("old prompt", request_context=context)
     (exchange / "response.json").write_text('{"segments": []}', encoding="utf-8")
-    with pytest.raises(LLMError, match="旧 prompt"):
+    with pytest.raises(WebResponseRequired, match="旧响应已保留"):
         client.complete("new prompt", request_context=context)
+    assert not (exchange / "response.json").exists()
+    assert len(list(exchange.glob("response.stale.*.json"))) == 1
