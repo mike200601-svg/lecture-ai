@@ -8,7 +8,7 @@
 # 匹配容差由 config.yaml 的 course.match_tolerance_minutes 控制（默认 ±30 分钟）
 # 匹配不上不会失败，只会落到 unknown 课程，事后可用 `lecture-ai assign` 归属。
 #
-# ↓↓↓ 下面是示例，请按实际课表修改 ↓↓↓
+# ↓↓↓ 当前实际课表；课程或时间变化后请同步更新 ↓↓↓
 
 courses:
   quantum_mechanics:
@@ -21,12 +21,20 @@ courses:
       - weekday: 3
         start: "09:45"
         end: "11:25"
-      - weekday: 3
-        start: "14:00"
-        end: "15:40"
       - weekday: 5
         start: "10:00"
         end: "11:40"
+
+  big_data:
+    name: 大数据
+    teacher: ""
+    semester: 2026-秋
+    glossary: big_data.txt
+    obsidian_folder: University/大数据
+    schedule:
+      - weekday: 3
+        start: "14:00"
+        end: "15:40"
 
   electrodynamics:
     name: 电动力学
