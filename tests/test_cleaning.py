@@ -252,6 +252,11 @@ def test_clean_cli_supports_dry_run_chunk_and_force():
     ])
     assert canary.command == "clean-canary"
     assert canary.chunks == [2, 5, 9]
+    web_import = build_parser().parse_args([
+        "clean-web-import", "session-1", "3", "result.json"
+    ])
+    assert web_import.command == "clean-web-import"
+    assert web_import.chunk == 3 and web_import.response_file == "result.json"
 
 
 def test_clean_pipeline_two_stage_cache_and_provenance(config, db):
@@ -528,3 +533,29 @@ def test_invalid_web_response_is_archived_with_retry_instructions(config, db):
     assert "segment 拓扑" in retry
     assert "程序不会自动猜测" in retry
     assert pipeline.sessions.load(meta.session_id).steps["clean"].status == "pending"
+
+
+def test_import_web_response_validates_and_writes_only_target_cache(config, db, tmp_path):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    pipeline = CleanPipeline(config, db, sleep=lambda _: None)
+    pipeline.run(meta.session_id, chunk=0)
+    prompt = (
+        session_dir / "analysis" / "clean_web" / "chunk_000" / "prompt.md"
+    ).read_text(encoding="utf-8")
+    downloaded = tmp_path / "downloaded.json"
+    downloaded.write_text(
+        json.dumps(_faithful_responder(prompt), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    outcome = pipeline.import_web_response(
+        meta.session_id, chunk=0, response_file=downloaded
+    )
+
+    assert outcome.chunks_processed == 1
+    assert (session_dir / "analysis" / "clean_cache" / "chunk_000.json").exists()
+    assert not (session_dir / "analysis" / "clean_cache" / "chunk_001.json").exists()
+    assert not (session_dir / "analysis" / "transcript_clean.json").exists()

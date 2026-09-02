@@ -426,6 +426,34 @@ class CleanPipeline:
             chunks=[self._record_audit(record) for record in records] + pending,
         )
 
+    def import_web_response(
+        self,
+        session_id: str,
+        *,
+        chunk: int,
+        response_file: Path,
+    ) -> CleanOutcome:
+        """原样导入网页 JSON，并只运行目标 chunk 的统一严格校验。"""
+        source = Path(response_file)
+        if not source.is_file():
+            raise LLMError(f"网页响应文件不存在：{source}")
+        session_dir = self.sessions.session_dir(session_id)
+        cache_path = (
+            session_dir / "analysis" / "clean_cache" / f"chunk_{chunk:03d}.json"
+        )
+        if cache_path.exists():
+            raise LLMError(f"chunk {chunk:03d} 已有正式缓存，拒绝静默覆盖")
+        exchange_dir = (
+            session_dir / "analysis" / "clean_web" / f"chunk_{chunk:03d}"
+        )
+        if not (exchange_dir / "request.json").exists():
+            self.run(session_id, chunk=chunk)
+        text = source.read_text(encoding="utf-8").strip()
+        if not text:
+            raise LLMError(f"网页响应文件为空：{source}")
+        atomic_write_text(exchange_dir / "response.json", text)
+        return self.run(session_id, chunk=chunk)
+
     @staticmethod
     def _archive_stale_canary_outputs(canary_dir: Path) -> None:
         """网页任务待重做时封存旧结果，避免把旧 CLEANED 误认成当前结果。"""

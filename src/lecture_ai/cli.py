@@ -572,6 +572,29 @@ def cmd_clean_canary(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_clean_web_import(args: argparse.Namespace) -> int:
+    """把下载的网页 JSON 原样导入指定 chunk，并立即严格校验。"""
+    from lecture_ai.cleaning import CleanPipeline
+
+    config = _bootstrap(args)
+    outcome = CleanPipeline(config).import_web_response(
+        args.session_id,
+        chunk=args.chunk,
+        response_file=Path(args.response_file),
+    )
+    if outcome.chunks_processed == 1 and not any(
+        item.get("waiting") for item in outcome.chunks
+    ):
+        out(
+            f"✔ {outcome.session_id}  chunk {args.chunk:03d} 网页结果已接受并写入正式缓存"
+        )
+        return EXIT_OK
+    for item in outcome.chunks:
+        if item.get("waiting"):
+            out(f"✘ chunk {args.chunk:03d} 网页结果未通过：{item.get('message')}")
+    return EXIT_FAILURE
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """长驻监听 incoming 目录。"""
     from lecture_ai.pipeline import Watcher
@@ -687,6 +710,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_canary.add_argument("--force", action="store_true", help="忽略 Canary 缓存重验")
     p_canary.set_defaults(func=cmd_clean_canary)
+
+    p_web_import = sub.add_parser(
+        "clean-web-import", help="导入并严格校验一个 GPT 网页 chunk 结果"
+    )
+    p_web_import.add_argument("session_id")
+    p_web_import.add_argument("chunk", type=int, help="0-based chunk 编号")
+    p_web_import.add_argument("response_file", help="网页下载的 JSON 文件")
+    p_web_import.set_defaults(func=cmd_clean_web_import)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,
