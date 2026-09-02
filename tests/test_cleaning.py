@@ -422,6 +422,59 @@ def test_canary_outputs_are_isolated_from_formal_clean(config, db):
     assert not (session_dir / "analysis" / "transcript_clean.json").exists()
 
 
+def test_formal_clean_promotes_only_matching_canary_cache(config, db):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "fake"
+    config.llm.model = "fake-clean-v1"
+    fake = FakeLLMClient(_faithful_responder)
+    pipeline = CleanPipeline(config, db, client=fake, sleep=lambda _: None)
+
+    pipeline.run_canary(meta.session_id, chunks=[0])
+    assert fake.calls == 1
+    outcome = pipeline.run(meta.session_id)
+
+    assert fake.calls == 2  # 正式运行只新清洗 chunk 1；chunk 0 安全复用 Canary
+    promoted = session_dir / "analysis" / "clean_cache" / "chunk_000.json"
+    assert promoted.exists()
+    promoted_data = json.loads(promoted.read_text(encoding="utf-8"))
+    assert promoted_data["cache_origin"] == "canary"
+    chunk_zero = next(item for item in outcome.chunks if item.get("index") == 0)
+    assert chunk_zero["cache_hit"] is True
+    assert chunk_zero["cache_origin"] == "canary"
+
+
+@pytest.mark.parametrize("changed_dependency", ["source", "prompt"])
+def test_stale_canary_cache_is_not_promoted(config, db, changed_dependency):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "fake"
+    config.llm.model = "fake-clean-v1"
+    canary_client = FakeLLMClient(_faithful_responder)
+    CleanPipeline(
+        config, db, client=canary_client, sleep=lambda _: None
+    ).run_canary(meta.session_id, chunks=[0])
+
+    if changed_dependency == "source":
+        source_path = session_dir / "transcript" / "transcript_repaired.json"
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        source["segments"][0]["text"] += " 来源已更新"
+        source_path.write_text(json.dumps(source, ensure_ascii=False), encoding="utf-8")
+    else:
+        prompt_path = config.paths.project_root / "prompts" / "transcript_clean.md"
+        prompt_path.write_text(
+            prompt_path.read_text(encoding="utf-8") + "\n<!-- prompt updated -->\n",
+            encoding="utf-8",
+        )
+
+    formal_client = FakeLLMClient(_faithful_responder)
+    outcome = CleanPipeline(
+        config, db, client=formal_client, sleep=lambda _: None
+    ).run(meta.session_id)
+
+    assert formal_client.calls == 2
+    chunk_zero = next(item for item in outcome.chunks if item.get("index") == 0)
+    assert chunk_zero.get("cache_origin") != "canary"
+
+
 def test_web_canary_prepares_every_prompt_before_waiting(config, db):
     meta, session_dir = _make_session(config, db, repaired=True)
     config.llm.provider = "chatgpt_web"

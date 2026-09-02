@@ -548,6 +548,13 @@ class CleanPipeline:
         path = cache_path or (
             session_dir / "analysis" / "clean_cache" / f"chunk_{plan.index:03d}.json"
         )
+        if cache_path is None and not force and not path.exists():
+            self._promote_matching_canary_cache(
+                session_dir=session_dir,
+                chunk_index=plan.index,
+                destination=path,
+                cache_key=key,
+            )
         record = self._cached_or_call(
             path,
             key,
@@ -568,6 +575,40 @@ class CleanPipeline:
         record["index"] = plan.index
         record["plan"] = plan.to_dict()
         return record
+
+    @staticmethod
+    def _promote_matching_canary_cache(
+        *,
+        session_dir: Path,
+        chunk_index: int,
+        destination: Path,
+        cache_key: str,
+    ) -> bool:
+        """把指纹完全一致的已验收 Canary 缓存提升为正式 chunk 缓存。
+
+        cache key 已覆盖 source SHA、prompt SHA、schema、课程词表、清洗配置、
+        provider/model、chunk index 与完整输入，因此任何依赖变化都会拒绝复用。
+        """
+        candidate = (
+            session_dir / "analysis" / "canary"
+            / f"chunk_{chunk_index:03d}" / "cache.json"
+        )
+        if not candidate.exists():
+            return False
+        try:
+            cached = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if cached.get("cache_key") != cache_key:
+            return False
+        promoted = dict(cached)
+        promoted["cache_hit"] = False
+        promoted["cache_origin"] = "canary"
+        atomic_write_text(
+            destination,
+            json.dumps(promoted, ensure_ascii=False, indent=2),
+        )
+        return True
 
     @staticmethod
     def _canary_payload(
@@ -899,7 +940,7 @@ class CleanPipeline:
     @staticmethod
     def _record_audit(record: dict[str, Any]) -> dict[str, Any]:
         keys = (
-            "stage", "index", "cache_hit", "provider", "model", "request_id",
+            "stage", "index", "cache_hit", "cache_origin", "provider", "model", "request_id",
             "usage", "retries", "attempt_count", "failed_attempts", "plan",
             "left_chunk", "right_chunk", "segment_ids", "elapsed_sec", "decision",
             "reasons", "llm_called",
