@@ -165,49 +165,6 @@ def test_clean_response_infers_formula_board_reference(config):
     assert cleaned[0]["visual_references"] == ["公式/板书位置"]
 
 
-def test_clean_response_rejects_inferred_formula_digits(config):
-    expected = [{"id": 21, "text": "1乘以234"}]
-    response = {"segments": [{
-        "id": 21,
-        "text": "1乘以2的3次方",
-        "uncertain": ["根据上下文推测"],
-        "visual_references": [],
-        "corrections": [],
-    }]}
-
-    with pytest.raises(LLMError, match="改变了数字序列"):
-        validate_clean_response(response, expected, config.clean)
-
-    leading_zero = {"segments": [{
-        "id": 21,
-        "text": "二进制数是1",
-        "uncertain": [],
-        "visual_references": [],
-        "corrections": [],
-    }]}
-    with pytest.raises(LLMError, match="改变了数字序列"):
-        validate_clean_response(
-            leading_zero,
-            [{"id": 21, "text": "二进制数是01"}],
-            config.clean,
-        )
-
-
-def test_clean_response_allows_equivalent_spoken_number_spelling(config):
-    expected = [{"id": 22, "text": "真空3级罐和二乘以十六的一字法"}]
-    response = {"segments": [{
-        "id": 22,
-        "text": "真空三极管和2乘以16的一次方",
-        "uncertain": [],
-        "visual_references": [],
-        "corrections": [],
-    }]}
-
-    cleaned = validate_clean_response(response, expected, config.clean)
-
-    assert cleaned[0]["text"] == "真空三极管和2乘以16的一次方"
-
-
 def test_clean_response_allows_non_formula_phonetic_digit_correction(config):
     expected = [{"id": 23, "text": "8.5也没人研究那个工艺"}]
     response = {"segments": [{
@@ -281,20 +238,6 @@ def test_prompt_is_external_and_renders_all_variables(config):
     assert path.name == "transcript_clean.md"
     assert "波函数" in rendered
     assert "{{" not in rendered
-
-
-def test_formula_heavy_prompt_adds_no_guess_guard(config):
-    _, template = load_clean_prompt(config.paths.project_root)
-    rendered = render_clean_prompt(
-        template,
-        mode="clean_chunk",
-        course_name="数字电子技术基础",
-        glossary=[],
-        segments=[{"id": 1, "text": "1乘以234"}],
-    )
-
-    assert "公式与数值硬约束" in rendered
-    assert "宁可保留坏转录，不能伪造好公式" in rendered
 
 
 def test_clean_cli_supports_dry_run_chunk_and_force():

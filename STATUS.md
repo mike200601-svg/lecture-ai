@@ -9,7 +9,7 @@
 | Phase 0 | 工程骨架 | ✅ 完成 |
 | Phase 1 | 音频自动转录 MVP | 🟡 连续真实课堂验收 2/3；第二节口音场景仍需 Phase 2 清洗 |
 | Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
-| Phase 2A | 忠实 Transcript Cleaning | 🟡 GPT 网页 Canary 2/3 provisional pass；公式块待重做 |
+| Phase 2A | 忠实 Transcript Cleaning | 🟡 三片 GPT 网页 Canary PASS；Gold 全量清洗待运行 |
 | Phase 2B/C/D | 结构、知识、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
@@ -23,10 +23,8 @@
 - 默认文本 provider 改为 `chatgpt_web/chatgpt-web-high`；无需 OpenAI SDK 或 API key。
 - 新增网页交换适配器、严格 `response.json` 导入、旧 prompt 响应封存和字符/网页轮次审计。
 - 相邻块先本地判定：内容相同或标点等价时确定性合并，只有实质文本冲突才调用 LLM。
-- Gold Session 的 chunk 02/05/09（约 24 分钟）已在 `analysis/canary/` 隔离准备；chunk 02
-  与 05 已导入并完成单片 provisional pass。chunk 09 的旧回复虽通过结构校验，但存在依据
-  数学上下文补齐公式 token 的风险，已连同旧 CLEANED/cache 封存；当前仅需重做 chunk 09。
-  正式 `transcript_clean.*` 仍不存在。
+- Gold Session 的 chunk 02/05/09（约 24 分钟）均已导入并通过 schema、拓扑、长度与人工
+  质量验收，三片 Canary 为 PASS。正式 `transcript_clean.*` 仍不存在，下一步是全量 12 块。
 - 隐私硬闸门：云端音频 false、云端图片 false、云端文本 true；doctor 全部关键项 OK。
 - 新增 `low_text_density` 与 `prompt_echo` 检测，分别捕获超长低文字片段和词表串入；
   同时捕获跨多个短 segment 的机械复读。稀疏窗口用 no-hotwords/no-VAD 隔离恢复，
@@ -38,13 +36,13 @@
   （2.286x 实时）；4 个异常 segments 合并为 3 个窗口，3/3 修复接受，229.67 秒可疑
   时长降至 0，当前 schema v4 产物为 1639 段，选择性 ASR 额外耗时 94.27 秒。
 - 数字电路开头隔离复核确认：录音前约 146 秒主要是候课环境声；原 ASR 首句时间戳提前，
-  且漏掉两句正式开课话语。Gold 正式 REPAIRED 暂不覆写，以免使正在进行的 Canary 失效。
+  且漏掉两句正式开课话语。Gold 正式 REPAIRED 暂不覆写，先保持已验收 Canary 的 source SHA。
 - Canary chunk 02 的本地质量门额外恢复 3 条照片引用、清除 9 个连续重复副本并去重
   correction audit；chunk 05 的 132 个 segments、2048 → 2180 字也通过单片评估。
-- chunk 09 已加入条件式 `formula-token-lock-v1`：公式/数值有歧义时必须保留原文并写
-  `uncertain`。本地又对约 311 秒公式原声做 no-VAD 隔离转录，确认幂展开与 `2A.7F`
-  确有连续语音证据；但 `173 ÷ 2` 的商仍被两次 ASR 识别为 80，不能静默改成 86。
-- 完整测试：**252 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
+- chunk 09 对约 311 秒公式原声做了 no-VAD 隔离复核，确认幂展开与十六进制示例后续 F
+  有连续语音证据。用户明确选择信任 GPT 5.6 的保守上下文恢复并接受原回复，不启用一刀切
+  的公式 token 硬锁；`173 ÷ 2` 的 80 → 86 修正及其证据差异已披露并记录。
+- 完整测试：**249 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
   medium/large-v3-turbo 缓存 partial 与无 CUDA 均为已知 WARN；配置中的本地 medium READY。
 
 ---

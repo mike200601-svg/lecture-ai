@@ -1,6 +1,6 @@
 # Phase 1.5 / Phase 2 TODO
 
-> 当前边界：Phase 1.5 已完成；Phase 2A 工程实现完成，正在做 GPT 网页 Canary；
+> 当前边界：Phase 1.5 已完成；Phase 2A 工程实现与 GPT 网页 Canary 已通过；
 > Phase 2B/C/D 只设计。
 
 ## Phase 1.5 Selective Transcript Repair
@@ -18,7 +18,7 @@
 - [x] 窗口级缓存、配置 fingerprint 与幂等复用
 - [x] 真实 94 分钟数字电子技术课堂验收
 - [x] 真实 100 分钟量子力学口音课堂扫描：4 个异常 segments / 3 个窗口 / 3 accepted
-- [ ] Canary 完成后再升级 Gold REPAIRED；当前禁止让 chunk 02/05 与 chunk 09 新 prompt 失效
+- [ ] Gold 正式 CLEANED 完成后再升级开头 REPAIRED；当前保持 Canary 的 source SHA 不变
 
 金样本：19 个异常 segments 合并为 16 个 repair windows；16 accepted / 0 rejected；
 可疑时长 582.86s → 0s；最大压缩率 29.7333 → 1.7419；额外 ASR 715.87s。
@@ -40,14 +40,13 @@
 - [x] `clean-canary` 隔离 RAW/REPAIRED/CLEANED 与网页交换文件
 - [x] 自然边界确定性跳过，只有重叠文本冲突才调用 LLM
 - [x] 显式照片/图像/板书引用确定性标注，避免模型漏填 `visual_references`
-- [x] 公式/数值块条件式忠实护栏、受保护 token 校验与旧网页产物可恢复封存
-- [ ] 人工回填并验收 Gold Session chunk 02/05/09 三段 Canary（02/05 provisional pass；09 待重做）
+- [x] 网页 prompt 更新时旧 response/cache/CLEANED 可恢复封存
+- [x] 人工回填并验收 Gold Session chunk 02/05/09 三段 Canary（全部 PASS）
 - [ ] Canary PASS 后对 Gold Session 真实运行 12 个 chunks + 条件边界协调
 - [ ] 按 RAW/REPAIRED/CLEANED 抽查 10 个指定类型窗口
 
-当前停止点：chunk 02/05 已导入并单片通过；chunk 09 的旧结果因公式 token 推断风险封存，
-当前 `prompt.md` 已加入公式忠实护栏，只需重新生成该块的 `response.json`。禁止用 FakeLLM
-生成 Gold Session 的 `transcript_clean.json`。
+当前停止点：三段 Canary 全部 PASS。下一步对 Gold Session 运行 12 个真实 GPT 网页清洗块
+及条件式边界协调；禁止用 FakeLLM 生成 Gold Session 的 `transcript_clean.json`。
 
 ## Phase 2B Lecture Structure Detection — NOT IMPLEMENTED
 

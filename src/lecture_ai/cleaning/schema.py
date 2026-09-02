@@ -31,12 +31,6 @@ _VISUAL_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
-_FORMULA_CUE = re.compile(
-    r"公式|等式|多项式|次方|乘以|除以|进制|系数|余数|整数|小数|"
-    r"(?:^|[^A-Za-z])[KkSsNnMm](?:[_\-\d{]|$)|"
-    r"\d[A-Fa-f](?:\.|$)|[A-Fa-f](?:\s*是|乘以)"
-)
-
 CLEAN_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -83,87 +77,6 @@ def infer_visual_references(text: str) -> list[str]:
     """从原句提取明确视觉线索；只做标注，不改写、不补充课堂事实。"""
     value = str(text or "")
     return [label for label, pattern in _VISUAL_CUES if pattern.search(value)]
-
-
-_CHINESE_DIGITS = {
-    "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3,
-    "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9,
-}
-_CHINESE_UNITS = {"十": 10, "百": 100, "千": 1000, "万": 10000}
-
-
-def _parse_chinese_number(value: str) -> str:
-    if not any(char in _CHINESE_UNITS for char in value):
-        return "".join(str(_CHINESE_DIGITS[char]) for char in value)
-    total = 0
-    current = 0
-    for char in value:
-        if char in _CHINESE_DIGITS:
-            current = _CHINESE_DIGITS[char]
-            continue
-        unit = _CHINESE_UNITS[char]
-        if unit == 10000:
-            total = (total + current) * unit
-        else:
-            total += (current or 1) * unit
-        current = 0
-    return str(total + current)
-
-
-def _numeric_tokens(text: str) -> tuple[str, ...]:
-    value = str(text or "")
-    value = re.sub(r"十六进制|十进制|八进制|二进制", "", value)
-    value = re.sub(r"(?<=\d)\s+(?=\d)", "", value)
-    tokens: list[str] = []
-    for match in re.finditer(r"\d+|[零〇一二两三四五六七八九十百千万]+", value):
-        token = match.group(0)
-        if token.isdigit():
-            tokens.append(token)
-        else:
-            tokens.append(_parse_chinese_number(token))
-    return tuple(tokens)
-
-
-def _formula_token_signature(
-    text: str,
-    *,
-    normalize_spoken_numbers: bool,
-) -> tuple[tuple[str, ...], str]:
-    """提取不能靠上下文猜测的数字/公式字母序列。"""
-    value = str(text or "")
-    digits = _numeric_tokens(value) if normalize_spoken_numbers else ()
-    letters = "".join(re.findall(r"[A-Za-z]", value)).lower()
-    return digits, letters
-
-
-def _validate_formula_token_integrity(source_text: str, cleaned_text: str, segment_id: int) -> None:
-    """禁止清洗层改写数值，或在公式语境中增删变量字母。"""
-    formula_sensitive = bool(
-        _FORMULA_CUE.search(source_text) or _FORMULA_CUE.search(cleaned_text)
-    )
-    if not formula_sensitive:
-        return
-    normalize_spoken_numbers = bool(re.search(r"\d", source_text + cleaned_text))
-    source_digits, source_letters = _formula_token_signature(
-        source_text,
-        normalize_spoken_numbers=normalize_spoken_numbers,
-    )
-    cleaned_digits, cleaned_letters = _formula_token_signature(
-        cleaned_text,
-        normalize_spoken_numbers=normalize_spoken_numbers,
-    )
-    if source_digits != cleaned_digits:
-        raise LLMError(
-            f"segment {segment_id} 改变了数字序列："
-            f"source={source_digits!r}, cleaned={cleaned_digits!r}；"
-            "公式/数值不得靠上下文补写"
-        )
-    if source_letters != cleaned_letters:
-        raise LLMError(
-            f"segment {segment_id} 改变了公式字母序列："
-            f"source={source_letters!r}, cleaned={cleaned_letters!r}；"
-            "变量和数制符号不得靠上下文补写"
-        )
 
 
 def _repeat_key(text: str) -> str:
@@ -255,11 +168,6 @@ def validate_clean_response(
             raise LLMError(
                 f"segment {item['id']} 清洗文本为空时必须在 uncertain 记录原因"
             )
-        _validate_formula_token_integrity(
-            str(source.get("text") or ""),
-            text,
-            int(item["id"]),
-        )
         deduped_corrections: list[dict[str, str]] = []
         seen_corrections: set[tuple[str, str, str, str]] = set()
         for correction in corrections:

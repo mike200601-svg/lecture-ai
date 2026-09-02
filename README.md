@@ -3,7 +3,7 @@
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
 **当前进度：Phase 1 真实课堂链路已验收；Phase 1.5 选择性修复已完成；Phase 2A
-清洗基础设施已完成，正在进行 GPT 网页版 Canary 验收。**
+清洗基础设施与 GPT 网页版 Canary 已通过，等待 Gold Session 全量清洗。**
 
 ```text
 荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
@@ -103,9 +103,9 @@ Phase 2A 产物在同一 Session 的 `analysis/`：
 默认 `llm.provider=chatgpt_web`：运行 `clean-canary` 后，把每个 `prompt.md` 分别粘贴到
 GPT 网页的新对话，将严格 JSON 回复保存为同目录 `response.json`，再运行同一命令完成
 schema/拓扑/长度校验并生成 `cleaned.json/.md`。Canary 通过前禁止生成 Gold 正式 CLEANED。
-含公式、指数、变量或数制的块会自动加入数值忠实护栏：原转录不明确时保留原文并写
-`uncertain`，不能靠计算结果补公式。prompt 更新时旧 response/cache/CLEANED 会改名封存，
-不会静默覆盖，也不会被误当成当前结果。
+prompt 更新时旧 response/cache/CLEANED 会改名封存，不会静默覆盖，也不会被误当成当前
+结果。公式纠错继续遵守主 prompt 的“不得猜测”约束，由三片 Canary 与人工抽查把关，
+不额外使用会阻止正常上下文纠错的 token 硬锁。
 可选 `openai` API provider 仍保留，只有使用它时才从 `.env` 读取 `OPENAI_API_KEY`。
 
 ### 5. 手机自动同步（当前正式方案）

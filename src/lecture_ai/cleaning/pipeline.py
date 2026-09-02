@@ -12,11 +12,7 @@ from typing import Any, Callable
 from lecture_ai.cleaning.chunking import build_chunk_plan
 from lecture_ai.cleaning.boundary import decide_boundary
 from lecture_ai.cleaning.models import ChunkPlan, CleanOutcome
-from lecture_ai.cleaning.prompting import (
-    clean_prompt_policy_key,
-    load_clean_prompt,
-    render_clean_prompt,
-)
+from lecture_ai.cleaning.prompting import load_clean_prompt, render_clean_prompt
 from lecture_ai.cleaning.schema import CLEAN_RESPONSE_SCHEMA, validate_clean_response
 from lecture_ai.config import Config
 from lecture_ai.database import Database
@@ -548,9 +544,7 @@ class CleanPipeline:
             glossary=glossary,
             segments=inputs,
         )
-        policy_key = clean_prompt_policy_key(inputs)
-        call_fingerprint = f"{fingerprint}:{policy_key}" if policy_key else fingerprint
-        key = self._call_key(call_fingerprint, "chunk", plan.index, inputs)
+        key = self._call_key(fingerprint, "chunk", plan.index, inputs)
         path = cache_path or (
             session_dir / "analysis" / "clean_cache" / f"chunk_{plan.index:03d}.json"
         )
