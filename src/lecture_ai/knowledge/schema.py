@@ -197,6 +197,7 @@ def validate_knowledge_response(
         source_positions=source_positions,
         topic_sources=topic_sources,
         has_uncertain=False,
+        blank_ok_fields=frozenset({"content"}),
     )
     uncertain_coverage = _coverage(normalized["uncertain_items"])
 
@@ -242,16 +243,19 @@ def validate_knowledge_response(
             f"CLEANED visual reference 未进入 unresolved queue：{sorted(missing_visual)[:20]}"
         )
 
-    incomplete_equations = {
-        value
-        for item in normalized["equations"] if item["status"] != "complete"
-        for value in item["source_segment_ids"]
-    }
-    missing_equation_uncertainty = incomplete_equations - uncertain_coverage
-    if missing_equation_uncertainty:
+    # 不完整公式必须可追溯到显式 uncertainty，但只要求命中来源区间中的问题段，
+    # 不要求整段证据区间。一条推导常跨十几个 segment，问题往往只在其中一两处；
+    # 强制全覆盖会把清晰语音也标成存疑，而 Phase 2D 会把每条 uncertainty 渲染成
+    # [!question]，等于凭空制造疑点。equation 自身的 uncertain 非空由上面单独把关。
+    unrouted_equations = [
+        item["id"]
+        for item in normalized["equations"]
+        if item["status"] != "complete"
+        and not set(item["source_segment_ids"]) & uncertain_coverage
+    ]
+    if unrouted_equations:
         raise LLMError(
-            "不完整公式未进入 uncertain_items："
-            f"{sorted(missing_equation_uncertainty)[:20]}"
+            f"不完整公式未进入 uncertain_items：{unrouted_equations[:20]}"
         )
 
     retention_map = {
@@ -272,6 +276,24 @@ def validate_knowledge_response(
     return normalized
 
 
+def _sources_blank(ids: Any, source_by_id: dict[int, dict]) -> bool:
+    """来源 segment 在 CLEANED 中是否全部为空。
+
+    Phase 2A 会把术语串入、模板幻觉和复读副本审计清空并留下 delete 记录。这些
+    segment 没有正文可引用，要求引用它们的条目写出非空文本等于逼模型编内容。
+    """
+    if not isinstance(ids, list) or not ids:
+        return False
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool) and value in source_by_id
+        for value in ids
+    ):
+        return False
+    return all(
+        not str(source_by_id[value].get("text") or "").strip() for value in ids
+    )
+
+
 def _validate_category(
     values: list[Any],
     category: str,
@@ -282,6 +304,7 @@ def _validate_category(
     source_positions: dict[int, int],
     topic_sources: dict[str, set[int]],
     has_uncertain: bool = True,
+    blank_ok_fields: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     if len(values) > len(source_by_id):
         raise LLMError(f"{category} 数量异常，超过来源 segment 数")
@@ -300,6 +323,10 @@ def _validate_category(
         for field in text_fields:
             value = raw.get(field)
             if not isinstance(value, str) or not value.strip():
+                if field in blank_ok_fields and _sources_blank(
+                    raw.get("source_segment_ids"), source_by_id
+                ):
+                    continue
                 raise LLMError(f"{category} {item_id} 的 {field} 不能为空")
             if len(value) > 2000 or "<cleaned_json>" in value or "<outline_json>" in value:
                 raise LLMError(f"{category} {item_id} 文本异常或疑似 prompt echo")

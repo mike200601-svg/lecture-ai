@@ -10,6 +10,7 @@ import pytest
 from lecture_ai.cli import build_parser
 from lecture_ai.errors import LLMError
 from lecture_ai.knowledge import KnowledgePipeline, validate_knowledge_response
+from lecture_ai.knowledge.schema import _coverage
 from lecture_ai.llm import FakeLLMClient
 from lecture_ai.structure import StructurePipeline
 from tests.test_cleaning import _make_session
@@ -192,3 +193,89 @@ def test_knowledge_cli_supports_dry_run_and_force():
     args = build_parser().parse_args(["knowledge", "session-1", "--dry-run", "--force"])
     assert args.command == "knowledge"
     assert args.session_id == "session-1" and args.dry_run and args.force
+
+
+def test_knowledge_accepts_blank_uncertain_content_only_for_audited_blank_source(
+    config, db
+):
+    """2A 审计清空的 segment 无正文可引，uncertain_items 允许空 content。
+
+    真实 Gold 回归：CLEANED 把术语串入/模板幻觉/复读副本清空后，Phase 2C 仍必须为
+    这些 segment 留下可追溯的 uncertain 条目；要求非空 content 等于逼模型编内容。
+    非空来源仍然不许空 content。
+    """
+    source = _source()
+    source[2]["text"] = ""
+    source[2]["uncertain"] = ["整段为术语表串入，已在 CLEANED 审计删除"]
+    _, _, source, outline = _formal_inputs(config, db, source=source)
+
+    response = _knowledge()
+    response["uncertain_items"] = [{
+        "id": "uncertain_001", "topic_id": "topic_001",
+        "content": "", "reason": "整段在 CLEANED 中已被审计删除，无正文可引用",
+        "source_segment_ids": [2],
+    }]
+    accepted = validate_knowledge_response(
+        response, source, outline, concept_threshold=0.8
+    )
+    assert accepted["uncertain_items"][0]["content"] == ""
+    assert accepted["uncertain_items"][0]["source_segment_ids"] == [2]
+
+    # 来源非空时空 content 仍然拒绝
+    still_strict = _knowledge()
+    still_strict["uncertain_items"] = [{
+        "id": "uncertain_001", "topic_id": "topic_001",
+        "content": "", "reason": "偷懒留空",
+        "source_segment_ids": [0, 1],
+    }]
+    with pytest.raises(LLMError, match="content 不能为空"):
+        validate_knowledge_response(
+            still_strict, source, outline, concept_threshold=0.8
+        )
+
+    # reason 任何时候都不能为空
+    no_reason = _knowledge()
+    no_reason["uncertain_items"] = [{
+        "id": "uncertain_001", "topic_id": "topic_001",
+        "content": "", "reason": "",
+        "source_segment_ids": [2],
+    }]
+    with pytest.raises(LLMError, match="reason 不能为空"):
+        validate_knowledge_response(
+            no_reason, source, outline, concept_threshold=0.8
+        )
+
+
+def test_knowledge_incomplete_equation_needs_uncertainty_but_not_full_span(config, db):
+    """不完整公式要求命中问题段，而不是整条证据区间都标存疑。
+
+    真实 Gold 回归：基数乘法推导跨 12 个 segment，只有一处口述不完整。要求全覆盖
+    会把清晰语音也拖进 uncertainty，Phase 2D 再把每条渲染成 [!question]，等于制造疑点。
+    """
+    source = _source()
+    for item in source:
+        item["text"] = "老师板书这个式子等于多少。"
+    _, _, source, outline = _formal_inputs(config, db, source=source)
+
+    response = _knowledge()
+    response["equations"] = [{
+        "id": "equation_001", "topic_id": "topic_001", "name": "跨多段的推导",
+        "expression": "S = K_n·2^n + …", "status": "incomplete",
+        "source_segment_ids": [0, 1, 2, 3], "uncertain": ["第2段口述不完整"],
+    }]
+
+    # 零覆盖仍然拒绝
+    with pytest.raises(LLMError, match="不完整公式未进入"):
+        validate_knowledge_response(response, source, outline, concept_threshold=0.8)
+
+    # 只覆盖真正有问题的那一段即可通过
+    response["uncertain_items"] = [{
+        "id": "uncertain_001", "topic_id": "topic_001",
+        "content": "这个式子等于多少没说完", "reason": "口述不完整，依赖板书",
+        "source_segment_ids": [2],
+    }]
+    accepted = validate_knowledge_response(
+        response, source, outline, concept_threshold=0.8
+    )
+    assert accepted["equations"][0]["status"] == "incomplete"
+    assert _coverage(accepted["uncertain_items"]) == {2}
