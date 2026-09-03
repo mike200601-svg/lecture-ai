@@ -14,7 +14,7 @@ from pathlib import Path
 
 from lecture_ai.config import Config
 from lecture_ai.database import Database
-from lecture_ai.errors import SessionNotFound
+from lecture_ai.errors import SessionError, SessionNotFound
 from lecture_ai.logging_setup import get_logger
 from lecture_ai.session.courses import Course
 from lecture_ai.session.models import (
@@ -25,12 +25,12 @@ from lecture_ai.session.models import (
 )
 from lecture_ai.utils.paths import atomic_write_text, ensure_dir
 from lecture_ai.utils.slug import slugify
-from lecture_ai.utils.timefmt import now_local, to_iso
+from lecture_ai.utils.timefmt import now_local, parse_iso, to_iso
 
 METADATA_FILENAME = "metadata.json"
 
 #: session 目录下的固定子目录
-SUBDIRS = ("raw", "audio", "transcript", "images", "analysis", "note", "logs")
+SUBDIRS = ("raw", "audio", "transcript", "images", "slides", "analysis", "note", "logs")
 
 
 class SessionManager:
@@ -51,16 +51,21 @@ class SessionManager:
     # ---------------------------------------------------------------- 创建
 
     def make_session_id(self, course: Course, start: datetime) -> str:
-        """生成 2026-09-03_quantum-mechanics_001。
+        """生成 2026-09-03_0943_quantum-mechanics_001。
+
+        名字里带上课时间与课程，是为了光看目录名就知道这是哪一节课 —— 同一天上
+        两门课、或同一门课上下午各一节时，只有日期是分不出来的。
 
         序号在「同日同课程」内递增，且要避开磁盘上已存在的目录
-        （DB 被删过时仍然不能撞车）。
+        （DB 被删过时仍然不能撞车）。旧格式 `日期_课程_序号` 的目录继续可读，
+        这里只影响新建的 session。
         """
         date_str = start.strftime("%Y-%m-%d")
+        time_str = start.strftime("%H%M")
         slug = slugify(course.key)
         seq = self.db.next_session_seq(date_str, course.key)
         while True:
-            candidate = f"{date_str}_{slug}_{seq:03d}"
+            candidate = f"{date_str}_{time_str}_{slug}_{seq:03d}"
             if not self.session_dir(candidate).exists():
                 return candidate
             seq += 1
@@ -100,6 +105,58 @@ class SessionManager:
         self.save(meta)
         self.log.info("创建 session %s（课程：%s）", session_id, course.name)
         return meta
+
+    # ------------------------------------------------------------ 重命名
+
+    def canonical_session_id(self, meta: SessionMeta) -> str:
+        """按当前 metadata 推导出规范目录名。
+
+        课程识别失败时 session 会落到 `unknown`，等人工把课程填对之后，目录名
+        仍然停留在旧名字上。这个方法给出「它现在应该叫什么」。
+        """
+        start = parse_iso(meta.start_time)
+        date_str = meta.date
+        slug = slugify(meta.course.key)
+        if start is None:
+            return f"{date_str}_{slug}_001"
+        return f"{date_str}_{start.strftime('%H%M')}_{slug}_001"
+
+    def relabel(self, session_id: str, new_id: str | None = None) -> str:
+        """把 session 目录改名成能认出是哪节课的名字。
+
+        只改目录名、metadata.session_id 与数据库索引。**下游 analysis 产物一旦
+        存在就拒绝改名**：outline/knowledge/audio_draft 内部都写着 session_id，
+        而且彼此用 SHA 串成链，改写任何一个都会让整条 provenance 链失效。要给
+        已经跑完的 session 改名，只能改完重跑 Phase 2。
+        """
+        meta = self.load(session_id)
+        target = new_id or self.canonical_session_id(meta)
+        if target == session_id:
+            return session_id
+        source_dir = self.session_dir(session_id)
+        target_dir = self.session_dir(target)
+        if target_dir.exists():
+            raise SessionError(f"目标目录已存在，拒绝覆盖：{target_dir}")
+
+        analysis = source_dir / "analysis"
+        blocking = sorted(
+            path.name for path in analysis.glob("*.json")
+        ) if analysis.is_dir() else []
+        if blocking:
+            raise SessionError(
+                f"session {session_id} 已有 Phase 2 产物（{', '.join(blocking[:5])}"
+                f"{' 等' if len(blocking) > 5 else ''}），改名会让 provenance 链失效。"
+                "请先确认是否愿意重跑 Phase 2，再手工处理。"
+            )
+
+        source_dir.rename(target_dir)
+        meta.session_id = target
+        self.save(meta)
+        self.db.delete_session(session_id)
+        self.log.info(
+            "session 改名 %s -> %s（课程：%s）", session_id, target, meta.course.name
+        )
+        return target
 
     # ---------------------------------------------------------------- 读写
 

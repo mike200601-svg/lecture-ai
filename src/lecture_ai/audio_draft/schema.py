@@ -9,6 +9,7 @@ from lecture_ai.errors import LLMError
 ITEM_ID_FIELDS = {
     "concepts": "concept_ids",
     "equations": "equation_ids",
+    "derivations": "derivation_ids",
     "examples": "example_ids",
     "teacher_emphasis": "teacher_emphasis_ids",
     "exam_tips": "exam_tip_ids",

@@ -118,6 +118,11 @@ class Database:
                 ),
             )
 
+    def delete_session(self, session_id: str) -> None:
+        """删除 session 索引行。session 改名后用来清掉旧行。"""
+        with self.connect() as conn:
+            conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
     def get_session(self, session_id: str) -> sqlite3.Row | None:
         with self.connect() as conn:
             return conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()

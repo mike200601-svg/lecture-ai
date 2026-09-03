@@ -16,7 +16,9 @@ def test_load_minimal_config(config, project_root):
     assert config.paths.incoming_audio.is_absolute()
     assert config.paths.incoming_audio == project_root / "data" / "incoming" / "audio"
     assert config.paths.web_exchange == project_root / "data" / "web_exchange"
+    assert config.paths.export_dir == project_root / "exports"
     assert config.transcription.provider == "fake"
+    assert config.obsidian.create_concepts is False
 
 
 def test_defaults_applied_for_missing_sections(project_root):
@@ -29,6 +31,7 @@ def test_defaults_applied_for_missing_sections(project_root):
     assert cfg.transcription.local_whisper.use_hotwords is False
     assert cfg.audio.target_sample_rate == 16000
     assert cfg.privacy.allow_cloud_audio is False
+    assert cfg.obsidian.create_concepts is False
 
 
 def test_missing_config_file_uses_defaults(tmp_path):
@@ -82,7 +85,12 @@ def test_invalid_yaml_raises_config_error(project_root):
 
 def test_ensure_dirs_creates_everything(config):
     config.ensure_dirs()
-    for p in (config.paths.incoming_audio, config.paths.session_dir, config.paths.log_dir):
+    for p in (
+        config.paths.incoming_audio,
+        config.paths.session_dir,
+        config.paths.export_dir,
+        config.paths.log_dir,
+    ):
         assert p.exists(), p
 
 

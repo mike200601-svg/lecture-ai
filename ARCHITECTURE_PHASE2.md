@@ -1,5 +1,8 @@
 # Phase 1.5 / Phase 2 架构
 
+> **High Integrity / Audit Mode 参考。** 本文描述的完整 Phase 2 不再是默认日常路线；
+> 当前生产路线以 [ROADMAP.md](ROADMAP.md) 为准。
+
 本文在 `ARCHITECTURE_V1.md` 的 Phase 1 基线上扩展，不改变已经通过真实课堂验收的
 录音接入、预处理和全量 ASR 链路。
 

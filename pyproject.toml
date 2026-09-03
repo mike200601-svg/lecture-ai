@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lecture-ai"
-version = "0.1.0"
+version = "1.0.0"
 description = "课堂自动笔记与 Obsidian 知识库系统"
 readme = "README.md"
 requires-python = ">=3.11"

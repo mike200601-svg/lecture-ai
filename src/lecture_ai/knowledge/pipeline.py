@@ -25,7 +25,7 @@ from lecture_ai.utils.timefmt import now_local, to_iso
 
 KNOWLEDGE_JSON = "knowledge.json"
 UNRESOLVED_VISUAL_JSON = "unresolved_visual.json"
-KNOWLEDGE_SCHEMA_VERSION = 1
+KNOWLEDGE_SCHEMA_VERSION = 2
 STEP_KNOWLEDGE = "knowledge"
 
 

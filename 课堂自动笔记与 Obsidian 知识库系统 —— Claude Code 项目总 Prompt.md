@@ -1,5 +1,8 @@
 # 课堂自动笔记与 Obsidian 知识库系统 —— Claude Code 项目总 Prompt
 
+> **Historical Snapshot / 原始立项 Prompt。** 本文保留早期需求，不代表当前实现状态或
+> 默认路线；凡与 [ROADMAP.md](ROADMAP.md) 冲突，均以 ROADMAP 为准。
+
 我希望你协助我从零开发一个「大学课堂自动记录 → AI整理 → Obsidian知识库」系统。
 
 请把它当作一个长期可维护的软件工程，而不是一次性脚本。

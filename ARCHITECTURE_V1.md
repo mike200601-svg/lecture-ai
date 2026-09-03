@@ -1,5 +1,8 @@
 # ARCHITECTURE_V1 —— 课堂自动笔记系统 Phase 0～2 架构设计
 
+> **Historical Architecture Snapshot。** 本文保留初始架构决策；当前默认生产路线以
+> [ROADMAP.md](ROADMAP.md) 为唯一权威。
+
 > 版本：V1
 > 日期：2026-08-31
 > 覆盖范围：Phase 0（骨架）、Phase 1（音频转录 MVP），以及 Phase 2～4 的接口预留

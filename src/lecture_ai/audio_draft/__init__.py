@@ -4,6 +4,8 @@ from lecture_ai.audio_draft.models import AudioDraftOutcome
 from lecture_ai.audio_draft.pipeline import (
     AUDIO_DRAFT_JSON,
     AUDIO_DRAFT_MD,
+    audio_draft_md_name,
+    resolve_audio_draft_md,
     AudioDraftPipeline,
 )
 from lecture_ai.audio_draft.schema import DRAFT_RESPONSE_SCHEMA, validate_draft_response
@@ -11,6 +13,8 @@ from lecture_ai.audio_draft.schema import DRAFT_RESPONSE_SCHEMA, validate_draft_
 __all__ = [
     "AUDIO_DRAFT_JSON",
     "AUDIO_DRAFT_MD",
+    "audio_draft_md_name",
+    "resolve_audio_draft_md",
     "DRAFT_RESPONSE_SCHEMA",
     "AudioDraftOutcome",
     "AudioDraftPipeline",

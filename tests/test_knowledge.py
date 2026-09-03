@@ -29,6 +29,7 @@ def _knowledge() -> dict:
             "uncertain": [],
         }],
         "equations": [],
+        "derivations": [],
         "examples": [{
             "id": "example_001",
             "topic_id": "topic_002",
@@ -279,3 +280,145 @@ def test_knowledge_incomplete_equation_needs_uncertainty_but_not_full_span(confi
     )
     assert accepted["equations"][0]["status"] == "incomplete"
     assert _coverage(accepted["uncertain_items"]) == {2}
+
+
+def _derivation(**overrides) -> dict:
+    item = {
+        "id": "derivation_001",
+        "topic_id": "topic_001",
+        "name": "基数除法原理",
+        "steps": [
+            "把 S 的前 n 项各提出一个 2，右边只剩 K_0 乘以 2 的 0 次方。",
+            "2 的 0 次方等于 1，所以 S 除以 2 的余数就是 K_0。",
+        ],
+        "conclusion": "连续除以 2 取余，依次得到 K_0、K_1 直到 K_n。",
+        "status": "complete",
+        "source_segment_ids": [0, 1],
+        "uncertain": [],
+    }
+    item.update(overrides)
+    return item
+
+
+def _numeric_source() -> list[dict]:
+    """推导校验要求来源里有公式/计算证据，默认 fixture 的纯文字不满足。"""
+    source = _source()
+    for item in source[:4]:
+        item["text"] = f"第{item['id']}段：把 S 除以 2 得到余数 K_0 等于 1。"
+    return source
+
+
+def test_knowledge_accepts_derivation_steps_and_keeps_them_separate_from_equations():
+    """2C 必须把老师的推导过程本身留下来，而不是只留结论。
+
+    A/B 对照发现 outline 检出的 derivations 在 2B→2C 边界被整体丢弃，笔记里
+    只剩一行结论。这条测试锁住修复后的行为。
+    """
+    source = _numeric_source()
+    response = _knowledge()
+    response["derivations"] = [_derivation()]
+    accepted = validate_knowledge_response(
+        response, source, _outline(source), concept_threshold=0.8
+    )
+    assert [item["id"] for item in accepted["derivations"]] == ["derivation_001"]
+    assert len(accepted["derivations"][0]["steps"]) == 2
+    assert accepted["derivations"][0]["conclusion"].startswith("连续除以 2")
+    assert accepted["equations"] == []
+
+
+def test_knowledge_rejects_single_step_derivation_as_conclusion_only():
+    source = _numeric_source()
+    response = _knowledge()
+    response["derivations"] = [_derivation(steps=["连续除以 2 取余即可。"])]
+    with pytest.raises(LLMError, match="至少给出 2 个推导步骤"):
+        validate_knowledge_response(
+            response, source, _outline(source), concept_threshold=0.8
+        )
+
+
+def test_knowledge_rejects_derivation_without_calculation_evidence():
+    # _FORMULA_CUE 会命中任意数字，默认 fixture 的「第0段课堂内容」本身就算证据，
+    # 这里显式换成完全没有计算线索的文本。
+    source = _source()
+    for item in source:
+        item["text"] = "老师在讲台上随口聊了几句与本节无关的闲话。"
+    response = _knowledge()
+    response["derivations"] = [_derivation()]
+    with pytest.raises(LLMError, match="没有推导/计算证据"):
+        validate_knowledge_response(
+            response, source, _outline(source), concept_threshold=0.8
+        )
+
+
+def test_knowledge_rejects_incomplete_derivation_without_uncertainty():
+    source = _numeric_source()
+    response = _knowledge()
+    response["derivations"] = [_derivation(status="incomplete")]
+    with pytest.raises(LLMError, match="不完整时必须说明 uncertainty"):
+        validate_knowledge_response(
+            response, source, _outline(source), concept_threshold=0.8
+        )
+
+
+def test_outline_derivation_must_be_carried_by_knowledge_derivations():
+    """旧实现允许用 equations 的证据区间顶替推导，这正是推理丢失的根因。"""
+    source = _numeric_source()
+    outline = _outline(source)
+    outline["derivations"] = [{
+        "id": "R01",
+        "topic_id": "topic_001",
+        "label": "基数除法原理",
+        "start": source[0]["start"],
+        "end": source[1]["end"],
+        "source_segment_ids": [0, 1],
+        "uncertain": [],
+    }]
+    response = _knowledge()
+    response["equations"] = [{
+        "id": "equation_001",
+        "topic_id": "topic_001",
+        "name": "基数除法取位关系",
+        "expression": "S 除以 2 的余数为 K_0",
+        "status": "complete",
+        "source_segment_ids": [0, 1],
+        "uncertain": [],
+    }]
+    with pytest.raises(LLMError, match="outline derivations 在知识层丢失来源"):
+        validate_knowledge_response(
+            response, source, outline, concept_threshold=0.8
+        )
+    response["derivations"] = [_derivation()]
+    accepted = validate_knowledge_response(
+        response, source, outline, concept_threshold=0.8
+    )
+    assert accepted["derivations"][0]["id"] == "derivation_001"
+
+
+def test_legacy_v1_knowledge_without_derivations_still_loads():
+    """现有 Gold 是 v1 产物，没有 derivations；加了新类别后必须仍能读取。"""
+    source = _numeric_source()
+    outline = _outline(source)
+    outline["derivations"] = [{
+        "id": "R01",
+        "topic_id": "topic_001",
+        "label": "基数除法原理",
+        "start": source[0]["start"],
+        "end": source[1]["end"],
+        "source_segment_ids": [0, 1],
+        "uncertain": [],
+    }]
+    legacy = _knowledge()
+    del legacy["derivations"]
+    legacy["equations"] = [{
+        "id": "equation_001",
+        "topic_id": "topic_001",
+        "name": "基数除法取位关系",
+        "expression": "S 除以 2 的余数为 K_0",
+        "status": "complete",
+        "source_segment_ids": [0, 1],
+        "uncertain": [],
+    }]
+    accepted = validate_knowledge_response(
+        legacy, source, outline, concept_threshold=0.8
+    )
+    assert accepted["derivations"] == []

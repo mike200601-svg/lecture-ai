@@ -4,8 +4,57 @@
 
 # CURRENT STATUS
 
-> 本节是当前唯一权威状态。下方 `HISTORICAL LOG` 全部是历史快照，
-> 其中的「待办」「下一步」只反映当时情形，**不要当成当前任务**。
+> **当前路线权威是 [ROADMAP.md](ROADMAP.md)。** 默认生产路线已改为 Direct GPT Web，
+> 完整 Phase 2 只保留为 High Integrity / Audit Mode。
+
+- **Phase 1 / 1.5：PASS / Production Verified**，连续真实课堂 3/3，包含口音和
+  轻声/杂音场景。手机录音经 Syncthing、watcher、本地 faster-whisper 和 selective
+  repair 产出正式 `transcript_repaired.md`。
+- **Phase 2A→2D：PASS / Gold Pipeline v1 冻结**。技术 QA 与生产实跑全部通过；
+  derivations 已贯通 OUTLINE→KNOWLEDGE→AUDIO DRAFT，并保留旧 schema / 旧文件名兼容。
+- **Product QA：DONE / 路线已裁决**。A/B 对照确认日常使用应由 REPAIRED 直接进入
+  GPT Web；完整 Phase 2 的 segment 溯源和修复审计能力保留给 High Integrity Mode。
+- **Session Export Package：IMPLEMENTED**。`lecture-ai export-package <session_id>`
+  只读取正式 REPAIRED，把已归属板书与明确课件复制到按日期、时间、课程命名的 GPT Web
+  投喂目录；manifest 记录来源与 SHA。缺 REPAIRED 硬失败，不回退 RAW；未知板书只 warning。
+- **v1.0 回归：316 passed**；`pip check` 与 `git diff --check` 纳入最终发布闸门。
+- **Phase 3 visual resolver：NOT IMPLEMENTED。** 不做 OCR、图片识别、EXIF 或图文自动对齐。
+- **Phase 4 Obsidian：NOT IMPLEMENTED。** `obsidian.create_concepts` 默认关闭，不创建
+  概念页、WikiLink、课程索引或知识图谱。
+
+默认生产路线：
+
+```text
+phone recording → Syncthing → watcher → local faster-whisper
+→ selective repair → transcript_repaired → export-package → GPT Web → final note
+```
+
+可选 High Integrity / Audit Mode（不是日常默认）：
+
+```text
+REPAIRED → CLEANED → OUTLINE → KNOWLEDGE → AUDIO DRAFT
+```
+
+当前 v1.0 唯一非阻塞后续方向是 **Obsidian import**；是否以及如何实现，等导出包经过
+真实课堂日常使用后再评估。
+
+---
+
+# HISTORICAL SNAPSHOT · v1.0 收口前
+
+> 以下内容保留当时的验收证据；其中“待裁决”“本轮不修”“当前待办”等表述已失效，
+> 不得覆盖上方 CURRENT STATUS 或 [ROADMAP.md](ROADMAP.md)。
+
+- **Phase 2 Technical QA：PASS**（2026-09-03 复核：295 passed / 0 failed，
+  provenance 链 SHA 全匹配，2B/2C/2D prompt fingerprint 全部与仓库当前版本一致）。
+- **Phase 2 Product QA：DONE / 结论待用户裁决**。B 组已跑（同模型 gpt-5.6-sol，
+  1 轮网页），对照见 `comparison/AB_EVALUATION.md`。客观测量结论：
+  B 未丢失 A 的任何已抽取知识项（41/41），且保留了 A 丢掉的推导过程；
+  A 全文正文率仅 16%，`[!question]` 占 52.5%、溯源标注占 30.2%。
+  **已定位结构性缺口：2B 检出的 6 条 derivations 在 2B→2C 边界被整体丢弃**
+  （`knowledge.json` 无 `derivations` 键、section 无 `derivation_ids`），
+  这是 A 推理丢失的根因。本轮不修。最终路线由用户在 AB_EVALUATION 的
+  User verdict 中裁决。
 
 - **Phase 1：PASS / Production Verified**，连续真实课堂 3/3（含口音、轻声/杂音场景）。
   历史记录里"等待第三节课堂"之类的阻塞项均已完成，不再有效。
@@ -23,7 +72,7 @@
   0 未知 segment、0 跨 topic；8 条公式全部有真实原声证据；CLEANED 的 32 个视觉
   segment 100% 进入未决队列，无一项声称 resolved。CLEANED/outline SHA 双匹配。
 - **Phase 2D：PASS**。正式 `analysis/audio_draft.json` 与
-  `note/lecture_audio_draft.md`（92,850 字符 / 17 sections）已生成。
+  `note/lecture_audio_draft.md`（50,726 字符 / 92,850 UTF-8 字节 / 17 sections）已生成。
   323 个知识项**恰好各编排一次**，0 重复、0 未知、0 跨 topic、0 遗漏；
   section provenance 覆盖全部知识项来源；sections 按原顺序恰好覆盖全部 segment。
   硬闸门：`source_layer: AUDIO_ONLY`、`final: false`、WikiLink 0 个、

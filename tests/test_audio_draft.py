@@ -15,13 +15,14 @@ from lecture_ai.knowledge import KnowledgePipeline
 from lecture_ai.llm import FakeLLMClient
 from tests.test_cleaning import _make_session
 from tests.test_knowledge import _formal_inputs, _knowledge
-from tests.test_structure import _source, _write_cleaned
+from tests.test_structure import _outline, _source, _write_cleaned
 
 
 def _draft(outline: dict, knowledge: dict) -> dict:
     categories = {
         "concept_ids": "concepts",
         "equation_ids": "equations",
+        "derivation_ids": "derivations",
         "example_ids": "examples",
         "teacher_emphasis_ids": "teacher_emphasis",
         "exam_tip_ids": "exam_tips",
@@ -214,7 +215,7 @@ def test_audio_draft_pipeline_writes_json_markdown_and_reuses(config, db):
     assert payload["generation"]["audio_only"] is True
     assert payload["generation"]["final"] is False
     assert "[!warning] Audio-only 草稿" in markdown
-    assert (session_dir / "note" / "lecture_audio_draft.md").exists()
+    assert (session_dir / "note" / f"{meta.session_id}_audio_draft.md").exists()
     assert pipeline.sessions.load(meta.session_id).steps["note"].status == "done"
 
 
@@ -242,3 +243,99 @@ def test_audio_draft_cli_supports_dry_run_and_force():
     args = build_parser().parse_args(["draft", "session-1", "--dry-run", "--force"])
     assert args.command == "draft"
     assert args.session_id == "session-1" and args.dry_run and args.force
+
+
+def _with_derivation(knowledge: dict) -> dict:
+    knowledge = json.loads(json.dumps(knowledge))
+    knowledge["derivations"] = [{
+        "id": "derivation_001",
+        "topic_id": "topic_001",
+        "name": "基数除法原理",
+        "steps": [
+            "把 S 的前 n 项各提出一个 2，右边只剩 K_0 乘以 2 的 0 次方。",
+            "2 的 0 次方等于 1，所以 S 除以 2 的余数就是 K_0。",
+        ],
+        "conclusion": "连续除以 2 取余，依次得到 K_0、K_1 直到 K_n。",
+        "status": "complete",
+        "source_segment_ids": [0, 1],
+        "uncertain": [],
+    }]
+    return knowledge
+
+
+def test_draft_validator_requires_every_derivation_to_be_scheduled():
+    """derivations 走的是与其他知识项相同的「恰好编排一次」闸门。"""
+    outline = _outline(_source())
+    knowledge = _with_derivation(_knowledge())
+    accepted = validate_draft_response(_draft(outline, knowledge), outline, knowledge)
+    assert accepted["sections"][0]["derivation_ids"] == ["derivation_001"]
+
+    dropped = _draft(outline, knowledge)
+    dropped["sections"][0]["derivation_ids"] = []
+    with pytest.raises(LLMError, match="丢失 derivation_ids"):
+        validate_draft_response(dropped, outline, knowledge)
+
+
+def test_renderer_writes_derivation_steps_not_just_the_conclusion():
+    """推导必须逐步落到 Markdown 上。
+
+    A/B 对照里 A 的基数除法只剩两行结论，学生拿不到「为什么余数就是 K_0」。
+    """
+    outline = _outline(_source())
+    knowledge = _with_derivation(_knowledge())
+    draft = validate_draft_response(_draft(outline, knowledge), outline, knowledge)
+    markdown = render_audio_draft(
+        session_id="2026-09-01_demo_001",
+        course="数字电子技术基础",
+        date="2026-09-01",
+        draft=draft,
+        outline=outline,
+        knowledge=knowledge,
+        unresolved_visual={"items": []},
+    )
+    assert "### 推导过程" in markdown
+    assert "1. 把 S 的前 n 项各提出一个 2" in markdown
+    assert "2. 2 的 0 次方等于 1" in markdown
+    assert "→ **结论**：连续除以 2 取余" in markdown
+
+
+def test_renderer_marks_incomplete_derivation_as_question():
+    outline = _outline(_source())
+    knowledge = _with_derivation(_knowledge())
+    knowledge["derivations"][0]["status"] = "incomplete"
+    knowledge["derivations"][0]["uncertain"] = ["中间一步依赖板书，音频未念出。"]
+    draft = validate_draft_response(_draft(outline, knowledge), outline, knowledge)
+    markdown = render_audio_draft(
+        session_id="2026-09-01_demo_001",
+        course="数字电子技术基础",
+        date="2026-09-01",
+        draft=draft,
+        outline=outline,
+        knowledge=knowledge,
+        unresolved_visual={"items": []},
+    )
+    assert "> [!question] 推导尚未核验" in markdown
+    assert "> 状态：incomplete" in markdown
+    assert "> - 中间一步依赖板书，音频未念出。" in markdown
+
+
+def test_note_filename_carries_session_identity_and_keeps_legacy(tmp_path):
+    """笔记文件名要能独立说明是哪节课，同时不让已有产物白白重跑。"""
+    from lecture_ai.audio_draft.pipeline import (
+        audio_draft_md_name,
+        resolve_audio_draft_md,
+    )
+
+    session_id = "2026-09-01_0943_digital-electronics_001"
+    assert audio_draft_md_name(session_id) == f"{session_id}_audio_draft.md"
+
+    session_dir = tmp_path / session_id
+    (session_dir / "note").mkdir(parents=True)
+    # 新 session：用带身份的新名字
+    assert resolve_audio_draft_md(session_dir, session_id).name == (
+        f"{session_id}_audio_draft.md"
+    )
+    # 旧产物已存在：沿用旧名，不触发重跑
+    legacy = session_dir / "note" / "lecture_audio_draft.md"
+    legacy.write_text("# 旧草稿", encoding="utf-8")
+    assert resolve_audio_draft_md(session_dir, session_id) == legacy

@@ -7,10 +7,13 @@ from typing import Any
 
 from lecture_ai.errors import LLMError
 
-KNOWLEDGE_FIELDS = (
+# v2 起 derivations 是独立类别。v1 产物没有这个字段，读取时按 legacy 处理，
+# 见 validate_knowledge_response —— 现有 Gold 无需重跑即可继续加载。
+LEGACY_KNOWLEDGE_FIELDS = (
     "concepts", "equations", "examples", "teacher_emphasis", "exam_tips",
     "common_errors", "open_questions", "visual_references", "uncertain_items",
 )
+KNOWLEDGE_FIELDS = (*LEGACY_KNOWLEDGE_FIELDS, "derivations")
 _SOURCE_IDS = {
     "type": "array", "items": {"type": "integer"}, "minItems": 1, "uniqueItems": True,
 }
@@ -49,6 +52,18 @@ EQUATION_SCHEMA = _object_schema({
     "status": {"type": "string", "enum": ["complete", "incomplete", "uncertain"]},
     **_TRACE,
 })
+DERIVATION_SCHEMA = _object_schema({
+    **_BASE,
+    "name": {"type": "string"},
+    "steps": {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 2,
+    },
+    "conclusion": {"type": "string"},
+    "status": {"type": "string", "enum": ["complete", "incomplete", "uncertain"]},
+    **_TRACE,
+})
 EXAMPLE_SCHEMA = _object_schema({
     **_BASE,
     "title": {"type": "string"},
@@ -83,6 +98,7 @@ KNOWLEDGE_RESPONSE_SCHEMA: dict[str, Any] = {
     "properties": {
         "concepts": {"type": "array", "items": CONCEPT_SCHEMA},
         "equations": {"type": "array", "items": EQUATION_SCHEMA},
+        "derivations": {"type": "array", "items": DERIVATION_SCHEMA},
         "examples": {"type": "array", "items": EXAMPLE_SCHEMA},
         "teacher_emphasis": {"type": "array", "items": SIMPLE_SCHEMA},
         "exam_tips": {"type": "array", "items": SIMPLE_SCHEMA},
@@ -108,9 +124,14 @@ def validate_knowledge_response(
     concept_threshold: float,
     timestamp_tolerance: float = 1.5,
 ) -> dict[str, list[dict[str, Any]]]:
-    if not isinstance(data, dict) or set(data) != set(KNOWLEDGE_FIELDS):
+    if not isinstance(data, dict):
         raise LLMError("Phase 2C JSON 顶层字段必须严格匹配 knowledge schema")
-    if any(not isinstance(data[field], list) for field in KNOWLEDGE_FIELDS):
+    # v1 产物没有 derivations。读取时按 legacy 容忍（补空数组），生成时必须带。
+    legacy = set(data) == set(LEGACY_KNOWLEDGE_FIELDS)
+    if not legacy and set(data) != set(KNOWLEDGE_FIELDS):
+        raise LLMError("Phase 2C JSON 顶层字段必须严格匹配 knowledge schema")
+    fields = LEGACY_KNOWLEDGE_FIELDS if legacy else KNOWLEDGE_FIELDS
+    if any(not isinstance(data[field], list) for field in fields):
         raise LLMError("Phase 2C JSON 的所有顶层字段都必须是数组")
     source_by_id = {int(item["id"]): item for item in source}
     source_positions = {
@@ -170,6 +191,46 @@ def validate_knowledge_response(
             raise LLMError(f"equation {item['id']} 来源中没有公式/计算证据，疑似编造")
         if item["status"] != "complete" and not item["uncertain"]:
             raise LLMError(f"equation {item['id']} 不完整时必须说明 uncertainty")
+
+    normalized["derivations"] = _validate_category(
+        data.get("derivations", []), "derivations",
+        fields={
+            "id", "topic_id", "name", "steps", "conclusion", "status",
+            "source_segment_ids", "uncertain",
+        },
+        text_fields=("name", "conclusion"),
+        source_by_id=source_by_id,
+        source_positions=source_positions,
+        topic_sources=topic_sources,
+    )
+    for item in normalized["derivations"]:
+        if item["status"] not in {"complete", "incomplete", "uncertain"}:
+            raise LLMError(f"derivation {item['id']} status 非法")
+        steps = item["steps"]
+        if not isinstance(steps, list) or len(steps) < 2:
+            raise LLMError(
+                f"derivation {item['id']} 必须至少给出 2 个推导步骤，"
+                "否则它是结论而不是推导"
+            )
+        cleaned_steps: list[str] = []
+        for index, step in enumerate(steps):
+            if not isinstance(step, str) or not step.strip():
+                raise LLMError(f"derivation {item['id']} 第 {index + 1} 步为空")
+            if (
+                len(step) > 2000 or "<cleaned_json>" in step
+                or "<outline_json>" in step
+            ):
+                raise LLMError(f"derivation {item['id']} 第 {index + 1} 步异常或疑似 prompt echo")
+            cleaned_steps.append(step.strip())
+        item["steps"] = cleaned_steps
+        evidence = "".join(
+            str(source_by_id[value].get("text") or "")
+            for value in item["source_segment_ids"]
+        )
+        if not _FORMULA_CUE.search(evidence):
+            raise LLMError(f"derivation {item['id']} 来源中没有推导/计算证据，疑似编造")
+        if item["status"] != "complete" and not item["uncertain"]:
+            raise LLMError(f"derivation {item['id']} 不完整时必须说明 uncertainty")
 
     normalized["examples"] = _validate_category(
         data["examples"], "examples",
@@ -258,9 +319,22 @@ def validate_knowledge_response(
             f"不完整公式未进入 uncertain_items：{unrouted_equations[:20]}"
         )
 
+    unrouted_derivations = [
+        item["id"]
+        for item in normalized["derivations"]
+        if item["status"] != "complete"
+        and not set(item["source_segment_ids"]) & uncertain_coverage
+    ]
+    if unrouted_derivations:
+        raise LLMError(
+            f"不完整推导未进入 uncertain_items：{unrouted_derivations[:20]}"
+        )
+
+    # v2 起 outline 的 derivations 必须由 knowledge.derivations 承接。v1 产物没有该
+    # 类别，退回旧规则（由 equations 的证据区间覆盖），否则现有 Gold 无法再加载。
     retention_map = {
         "definitions": "concepts",
-        "derivations": "equations",
+        "derivations": "equations" if legacy else "derivations",
         "examples": "examples",
         "teacher_emphasis": "teacher_emphasis",
         "exam_tips": "exam_tips",

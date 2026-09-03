@@ -192,7 +192,7 @@ def test_audio_draft_uses_same_phone_batch_and_auto_resumes(config, db, tmp_path
     assert outcome.status == "ready_for_phase2d_qa"
     assert outcome.accepted == 1 and outcome.rejected == 0
     assert (session_dir / "analysis" / "audio_draft.json").exists()
-    assert (session_dir / "note" / "lecture_audio_draft.md").exists()
+    assert (session_dir / "note" / f"{meta.session_id}_audio_draft.md").exists()
 
 
 def test_phase2_auto_advance_builds_each_next_phone_package(config, db, tmp_path):
@@ -251,7 +251,7 @@ def test_phase2_auto_advance_builds_each_next_phone_package(config, db, tmp_path
         ),
     )
     assert finished.status == "ready_for_phase2d_qa"
-    assert (session_dir / "note" / "lecture_audio_draft.md").is_file()
+    assert (session_dir / "note" / f"{meta.session_id}_audio_draft.md").is_file()
 
 
 def test_rejected_task_rebuilds_package_carrying_retry_reason(config, db, tmp_path):

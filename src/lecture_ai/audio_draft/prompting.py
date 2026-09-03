@@ -46,8 +46,8 @@ def render_draft_prompt(
     knowledge_payload = {
         key: knowledge[key]
         for key in (
-            "concepts", "equations", "examples", "teacher_emphasis", "exam_tips",
-            "common_errors", "open_questions", "uncertain_items",
+            "concepts", "equations", "derivations", "examples", "teacher_emphasis",
+            "exam_tips", "common_errors", "open_questions", "uncertain_items",
         )
     }
     visual_payload = {"items": unresolved_visual["items"]}

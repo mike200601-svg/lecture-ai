@@ -1,6 +1,7 @@
 # ---- 隐私：课堂录音、板书、转录文本一律不进版本库 ----
 data/**
 !data/**/.gitkeep
+exports/
 models/
 logs/**
 !logs/.gitkeep

@@ -30,8 +30,33 @@ from lecture_ai.utils.paths import atomic_write_text, ensure_dir
 from lecture_ai.utils.timefmt import now_local, to_iso
 
 AUDIO_DRAFT_JSON = "audio_draft.json"
-AUDIO_DRAFT_MD = "lecture_audio_draft.md"
-DRAFT_SCHEMA_VERSION = 1
+LEGACY_AUDIO_DRAFT_MD = "lecture_audio_draft.md"
+AUDIO_DRAFT_MD = LEGACY_AUDIO_DRAFT_MD
+
+
+def audio_draft_md_name(session_id: str) -> str:
+    """笔记文件名带上 session 身份。
+
+    草稿经常被单独发出去或单独打开，`lecture_audio_draft.md` 这种名字一旦离开
+    目录就分不出是哪节课。session_id 里已经有日期、时间和课程。
+    """
+    return f"{session_id}_audio_draft.md"
+
+
+def resolve_audio_draft_md(session_dir: Path, session_id: str) -> Path:
+    """新命名优先；旧产物（lecture_audio_draft.md）已存在时沿用旧名。
+
+    这样已经跑完的 session 不会因为改名规则而被判成缺产物、白白重跑一次网页。
+    """
+    note_dir = session_dir / "note"
+    preferred = note_dir / audio_draft_md_name(session_id)
+    if preferred.exists():
+        return preferred
+    legacy = note_dir / LEGACY_AUDIO_DRAFT_MD
+    if legacy.exists():
+        return legacy
+    return preferred
+DRAFT_SCHEMA_VERSION = 2
 STEP_NOTE = "note"
 
 
@@ -108,7 +133,7 @@ class AudioDraftPipeline:
             prompt_sha=prompt_sha,
         )
         output_json = analysis / AUDIO_DRAFT_JSON
-        output_md = session_dir / "note" / AUDIO_DRAFT_MD
+        output_md = resolve_audio_draft_md(session_dir, session_id)
 
         if dry_run:
             return AudioDraftOutcome(
@@ -177,7 +202,7 @@ class AudioDraftPipeline:
                 exchange_dir=exchange_dir,
                 request_context={
                     "pipeline": "audio_draft",
-                    "artifact": f"analysis/{AUDIO_DRAFT_JSON}+note/{AUDIO_DRAFT_MD}",
+                    "artifact": f"analysis/{AUDIO_DRAFT_JSON}+note/{output_md.name}",
                     "stage": "audio_draft",
                     "index": "draft",
                     "session_id": session_id,
@@ -257,7 +282,7 @@ class AudioDraftPipeline:
                 "fingerprint": fingerprint,
                 "prompt": "prompts/lecture_note.md",
                 "prompt_sha256": prompt_sha,
-                "markdown_file": f"note/{AUDIO_DRAFT_MD}",
+                "markdown_file": f"note/{output_md.name}",
                 "markdown_sha256": markdown_sha,
                 "audio_only": True,
                 "final": False,

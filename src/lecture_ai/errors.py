@@ -47,6 +47,14 @@ class SessionNotFound(LectureAIError):
     """指定的 session 不存在。"""
 
 
+class SessionError(LectureAIError):
+    """session 目录级操作失败（改名、冲突等）。"""
+
+
+class ExportPackageError(LectureAIError):
+    """GPT Web 投喂包无法安全生成。"""
+
+
 class InvalidTransition(LectureAIError):
     """非法的状态迁移。属于程序 bug，不应在正常流程中出现。"""
 

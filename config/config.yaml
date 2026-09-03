@@ -8,6 +8,8 @@ paths:
   incoming_audio: data/incoming/audio
   incoming_images: data/incoming/images     # Phase 3 才会用
   web_exchange: data/web_exchange           # 与手机双向同步：GPT 批处理包往返
+  # 日常 GPT 网页投喂包。每节课及包内文件均带日期、时间和课程名。
+  export_dir: "<paths.export_dir>"
   session_dir: data/sessions
   processed_dir: data/processed
   cache_dir: data/cache
@@ -56,7 +58,7 @@ audio:
 # ---------------------------------------------------------------- 处理流程
 processing:
   auto_process: true                        # watch 发现文件后是否立即处理
-  auto_advance_phase2: true                 # 网页结果通过严格校验后自动生成下一阶段任务包，直到 2D QA
+  auto_advance_phase2: true                 # 仅在人工进入 High Integrity Mode 后推进；日常路线不会启动 Phase 2
   poll_interval: 15                         # watch 轮询间隔（秒）
   stable_checks: 2                          # 连续几次采样大小/时间不变才算写入完成
   quiet_seconds: 10                         # 距最后修改至少多少秒
@@ -105,7 +107,7 @@ vision:
   model: claude-sonnet-5
 
 obsidian:
-  create_concepts: true
+  create_concepts: false                    # v1.0 刻意不创建概念页 / WikiLink / 图谱
   concept_threshold: 0.8
 
 # ---------------------------------------------------------------- 隐私（硬闸门）

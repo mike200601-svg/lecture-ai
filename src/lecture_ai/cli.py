@@ -83,6 +83,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     out(f"已就绪：")
     out(f"  录音投放目录  {config.paths.incoming_audio}")
     out(f"  Session 目录  {config.paths.session_dir}")
+    out(f"  GPT 投喂目录  {config.paths.export_dir}")
     out(f"  数据库        {config.paths.database}")
     out("")
     out("下一步：把课堂录音放进「录音投放目录」，然后运行 lecture-ai watch")
@@ -441,6 +442,31 @@ def cmd_retry(args: argparse.Namespace) -> int:
     return EXIT_FAILURE
 
 
+def cmd_relabel(args: argparse.Namespace) -> int:
+    """把 session 目录改名成能认出是哪节课的名字。
+
+    课程识别失败时 session 会落到 `unknown`；把 metadata 里的课程改对之后，用这个
+    命令让目录名跟上。
+    """
+    from lecture_ai.database import Database
+    from lecture_ai.session import SessionManager
+
+    config = _bootstrap(args)
+    db = Database(config.paths.database)
+    sessions = SessionManager(config, db)
+    meta = sessions.load(args.session_id)
+    target = args.to or sessions.canonical_session_id(meta)
+    if target == args.session_id:
+        out(f"✔ {args.session_id} 已经是规范名字，无需改动")
+        return EXIT_OK
+    if args.dry_run:
+        out(f"将改名：{args.session_id} -> {target}（课程：{meta.course.name}）")
+        return EXIT_OK
+    new_id = sessions.relabel(args.session_id, args.to)
+    out(f"✔ {args.session_id} -> {new_id}（课程：{meta.course.name}）")
+    return EXIT_OK
+
+
 def _parse_timestamp(value: str) -> float:
     """解析秒数或 HH:MM:SS(.sss)。"""
     value = value.strip()
@@ -728,6 +754,29 @@ def cmd_export(args: argparse.Namespace) -> int:
     return EXIT_FAILURE
 
 
+def cmd_export_package(args: argparse.Namespace) -> int:
+    """整理 REPAIRED、已归属板书和明确课件，供 GPT Web 手工上传。"""
+    from lecture_ai.export_package import ExportPackageBuilder
+
+    config = _bootstrap(args)
+    outcome = ExportPackageBuilder(config).build(
+        args.session_id,
+        board_paths=args.board,
+        slide_paths=args.slides,
+        dry_run=args.dry_run,
+    )
+    out("GPT Web 投喂包预览：" if outcome.dry_run else "GPT Web 投喂包已生成：")
+    out(f"  Session   {outcome.session_id}")
+    out(f"  输出目录  {outcome.output_dir}")
+    out(f"  REPAIRED  {outcome.transcript_source}")
+    out(f"  板书/课件 {outcome.board_count}/{outcome.slide_count}")
+    if outcome.unassigned_count:
+        out(f"  未归属板书 {outcome.unassigned_count}（仅记录 warning，未猜测、未打包）")
+    if not outcome.dry_run:
+        out(f"  Manifest  {outcome.manifest_path}")
+    return EXIT_OK
+
+
 # --------------------------------------------------------------------------- 解析
 
 
@@ -747,6 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  lecture-ai status <session>    查看单个 session 详情\n"
             "  lecture-ai retry <session>     重试失败的 session\n"
             "  lecture-ai repair <session>    选择性重转录可疑区域\n"
+            "  lecture-ai export-package <session>  生成 GPT Web 投喂包\n"
             "  lecture-ai clean <session>     分块清洗修复后的转录\n"
         ),
     )
@@ -854,6 +904,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_draft.add_argument("--force", action="store_true", help="忽略现有草稿产物与缓存")
     p_draft.set_defaults(func=cmd_draft)
+
+    p_relabel = sub.add_parser(
+        "relabel", help="把 session 目录改名成 日期_时间_课程_序号"
+    )
+    p_relabel.add_argument("session_id")
+    p_relabel.add_argument("--to", help="指定新名字，默认按 metadata 推导")
+    p_relabel.add_argument("--dry-run", action="store_true", help="只显示将要改成什么")
+    p_relabel.set_defaults(func=cmd_relabel)
+
+    p_export_package = sub.add_parser(
+        "export-package", help="整理一节课的 REPAIRED、板书和课件供 GPT Web 上传"
+    )
+    p_export_package.add_argument("session_id")
+    p_export_package.add_argument(
+        "--board", action="extend", nargs="+", default=[], metavar="PATH",
+        help="明确属于本节课的板书文件或目录（可传多个）",
+    )
+    p_export_package.add_argument(
+        "--slides", action="extend", nargs="+", default=[], metavar="PATH",
+        help="明确属于本节课的课件文件或目录（可传多个，不自动猜课程）",
+    )
+    p_export_package.add_argument("--dry-run", action="store_true", help="只显示计划，不写文件")
+    p_export_package.set_defaults(func=cmd_export_package)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,

@@ -25,7 +25,8 @@ def course(config):
 
 def test_create_session_id_format(manager, course):
     meta = manager.create(course, START)
-    assert meta.session_id == "2026-09-03_quantum-mechanics_001"
+    # 目录名带上课时间，光看名字就能分出同一天的不同节课
+    assert meta.session_id == "2026-09-03_1400_quantum-mechanics_001"
     assert meta.date == "2026-09-03"
     assert meta.state is SessionState.NEW
     assert meta.course.name == "量子力学"
@@ -34,9 +35,9 @@ def test_create_session_id_format(manager, course):
 def test_sequence_increments_same_day(manager, course):
     ids = [manager.create(course, START).session_id for _ in range(3)]
     assert ids == [
-        "2026-09-03_quantum-mechanics_001",
-        "2026-09-03_quantum-mechanics_002",
-        "2026-09-03_quantum-mechanics_003",
+        "2026-09-03_1400_quantum-mechanics_001",
+        "2026-09-03_1400_quantum-mechanics_002",
+        "2026-09-03_1400_quantum-mechanics_003",
     ]
 
 
@@ -49,7 +50,7 @@ def test_sequence_resets_next_day(manager, course):
 def test_session_directories_created(manager, course):
     meta = manager.create(course, START)
     sdir = manager.session_dir(meta.session_id)
-    for sub in ("raw", "audio", "transcript", "images", "analysis", "note", "logs"):
+    for sub in ("raw", "audio", "transcript", "images", "slides", "analysis", "note", "logs"):
         assert (sdir / sub).is_dir(), sub
 
 
@@ -150,9 +151,9 @@ def test_rebuild_index_from_disk(manager, config, course):
 
 def test_id_avoids_existing_directory(manager, course, config):
     """DB 计数与磁盘不一致时（比如手工删过库），也不能撞目录名。"""
-    (config.paths.session_dir / "2026-09-03_quantum-mechanics_001").mkdir(parents=True)
+    (config.paths.session_dir / "2026-09-03_1400_quantum-mechanics_001").mkdir(parents=True)
     meta = manager.create(course, START)
-    assert meta.session_id == "2026-09-03_quantum-mechanics_002"
+    assert meta.session_id == "2026-09-03_1400_quantum-mechanics_002"
 
 
 def test_rebuild_index_restores_file_dedup(manager, config, course, db):
@@ -173,3 +174,76 @@ def test_rebuild_index_restores_file_dedup(manager, config, course, db):
 
     assert fresh.file_exists("deadbeef") is not None
     assert fresh.list_courses()[0]["name"] == "量子力学"
+
+
+def _register(manager, course) -> None:
+    """课程要先进 courses 表，sessions 行才能引用它（外键）。"""
+    manager.db.upsert_course(
+        course.key, course.name, course.teacher, course.semester, course.glossary
+    )
+
+
+def test_canonical_session_id_follows_corrected_course(manager, course, config):
+    """课程识别失败落到 unknown，人工改对之后目录名要能跟上。"""
+    from lecture_ai.session.courses import Course
+
+    unknown = Course(key="unknown", name="未知课程", teacher=None, semester=None)
+    meta = manager.create(unknown, START)
+    assert meta.session_id == "2026-09-03_1400_unknown_001"
+
+    _register(manager, course)
+    meta.course = course.to_ref()
+    manager.save(meta)
+    assert manager.canonical_session_id(meta) == "2026-09-03_1400_quantum-mechanics_001"
+
+
+def test_relabel_renames_directory_and_reindexes(manager, course, config, db):
+    from lecture_ai.session.courses import Course
+
+    unknown = Course(key="unknown", name="未知课程", teacher=None, semester=None)
+    meta = manager.create(unknown, START)
+    old_id = meta.session_id
+    _register(manager, course)
+    meta.course = course.to_ref()
+    manager.save(meta)
+
+    new_id = manager.relabel(old_id)
+    assert new_id == "2026-09-03_1400_quantum-mechanics_001"
+    assert not manager.session_dir(old_id).exists()
+    assert manager.session_dir(new_id).is_dir()
+    assert manager.load(new_id).session_id == new_id
+    assert db.get_session(old_id) is None
+    assert db.get_session(new_id) is not None
+
+
+def test_relabel_refuses_when_phase2_artifacts_exist(manager, course):
+    """analysis 产物内部写着 session_id 并用 SHA 串成链，改名会让链失效。"""
+    from lecture_ai.errors import SessionError
+    from lecture_ai.session.courses import Course
+
+    unknown = Course(key="unknown", name="未知课程", teacher=None, semester=None)
+    meta = manager.create(unknown, START)
+    (manager.session_dir(meta.session_id) / "analysis" / "outline.json").write_text(
+        "{}", encoding="utf-8"
+    )
+    _register(manager, course)
+    meta.course = course.to_ref()
+    manager.save(meta)
+
+    with pytest.raises(SessionError, match="provenance 链失效"):
+        manager.relabel(meta.session_id)
+    assert manager.session_dir(meta.session_id).is_dir()
+
+
+def test_relabel_refuses_to_overwrite_existing_directory(manager, course):
+    from lecture_ai.errors import SessionError
+    from lecture_ai.session.courses import Course
+
+    unknown = Course(key="unknown", name="未知课程", teacher=None, semester=None)
+    meta = manager.create(unknown, START)
+    occupied = manager.create(course, START)
+    meta.course = course.to_ref()
+    manager.save(meta)
+
+    with pytest.raises(SessionError, match="目标目录已存在"):
+        manager.relabel(meta.session_id, occupied.session_id)

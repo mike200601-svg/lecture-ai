@@ -35,6 +35,7 @@ class PathsConfig:
     incoming_audio: Path
     incoming_images: Path
     web_exchange: Path
+    export_dir: Path
     session_dir: Path
     processed_dir: Path
     cache_dir: Path
@@ -153,7 +154,7 @@ class VisionConfig:
 
 @dataclass
 class ObsidianConfig:
-    create_concepts: bool = True
+    create_concepts: bool = False
     concept_threshold: float = 0.8
 
 
@@ -207,6 +208,7 @@ class Config:
             self.paths.incoming_audio,
             self.paths.incoming_images,
             self.paths.web_exchange,
+            self.paths.export_dir,
             self.paths.session_dir,
             self.paths.processed_dir,
             self.paths.cache_dir,
@@ -305,6 +307,7 @@ def load_config(config_path: Path | None = None, project_root: Path | None = Non
         incoming_audio=_resolve_path(p.get("incoming_audio", "data/incoming/audio"), root),
         incoming_images=_resolve_path(p.get("incoming_images", "data/incoming/images"), root),
         web_exchange=_resolve_path(p.get("web_exchange", "data/web_exchange"), root),
+        export_dir=_resolve_path(p.get("export_dir", "exports"), root),
         session_dir=_resolve_path(p.get("session_dir", "data/sessions"), root),
         processed_dir=_resolve_path(p.get("processed_dir", "data/processed"), root),
         cache_dir=_resolve_path(p.get("cache_dir", "data/cache"), root),

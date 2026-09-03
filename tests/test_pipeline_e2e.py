@@ -79,7 +79,7 @@ def test_full_pipeline(pipeline, config):
 
     # 文件名里带 2026-09-02 14:00（周三），应自动匹配到量子力学
     assert meta.course.key == "quantum_mechanics"
-    assert meta.session_id == "2026-09-02_quantum-mechanics_001"
+    assert meta.session_id == "2026-09-02_1400_quantum-mechanics_001"
     assert meta.state is SessionState.AUDIO_READY
     assert meta.start_time_confidence == "high"
 

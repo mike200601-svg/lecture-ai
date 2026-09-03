@@ -1,19 +1,32 @@
 # 课堂自动笔记与 Obsidian 知识库系统
 
-把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
+把大学理工科课堂的录音自动转成可靠文本，并把转录、板书照片和课件整理成可直接
+投喂 GPT 网页版的课堂材料包。
 
-**当前进度：Phase 1/1.5 已完成；Phase 2A Canary 已通过且 Gold 全量网页核验进行中；
-Phase 2B/2C/2D 工程已完成，等待 Gold 网页链完成后做真实产物 QA。**
+**当前进度：Phase 1/1.5/2A/2B/2C/2D 全部生产实跑通过（Gold Pipeline v1，已冻结）。
+2026-09-03 的 A/B 产品级对照之后，默认生产路线已改为 Direct GPT Web；
+完整 Phase 2 保留为 High Integrity / Audit Mode。**
+
+默认生产路线（日常使用）：
 
 ```text
-荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
-                                               → 分块 LLM CLEANED
-                                               → STRUCTURED → KNOWLEDGE → AUDIO_DRAFT
+phone recording → Syncthing → watcher → local faster-whisper
+→ selective repair → transcript_repaired → export-package → GPT Web → final note
 ```
 
-Phase 3 与 Obsidian 集成尚未开始。Phase 2 数据分层与边界见
-[ARCHITECTURE_PHASE2.md](ARCHITECTURE_PHASE2.md)，任务见
-[TODO_PHASE2.md](TODO_PHASE2.md)，进度见 [STATUS.md](STATUS.md)。
+High Integrity / Audit Mode（按需开启，代码与测试全部保留）：
+
+```text
+REPAIRED → CLEANED → OUTLINE → KNOWLEDGE → AUDIO DRAFT
+```
+
+**High Integrity Mode 不是默认日常路径。Phase 3 visual resolver NOT IMPLEMENTED；
+Phase 4 Obsidian NOT IMPLEMENTED。** 当前程序不会做 OCR、图片识别、WikiLink、概念页
+或知识图谱。
+
+**路线权威见 [ROADMAP.md](ROADMAP.md)**（含 A/B 对照结论与为什么改路线）。
+Phase 2 数据分层与边界见 [ARCHITECTURE_PHASE2.md](ARCHITECTURE_PHASE2.md)，
+任务见 [TODO_PHASE2.md](TODO_PHASE2.md)，进度见 [STATUS.md](STATUS.md)。
 
 ---
 
@@ -79,6 +92,9 @@ python -m lecture_ai status <session_id>   # 看单个 session 详情
 python -m lecture_ai retry <session_id>    # 重试失败的（不会重跑已成功的转录）
 python -m lecture_ai repair <session_id>   # 只重转录复读/幻觉可疑窗口
 python -m lecture_ai repair <session_id> --dry-run
+python -m lecture_ai export-package <session_id>  # 生成 GPT 网页版投喂包
+# 明确添加本节课的板书/课件（只复制，不移动；不会猜跨课课件）
+python -m lecture_ai export-package <session_id> --board <照片或目录> --slides <课件或目录>
 python -m lecture_ai clean <session_id>    # REPAIRED 优先，缺失时读 RAW
 python -m lecture_ai clean <session_id> --dry-run
 python -m lecture_ai clean-canary <session_id> --chunks 2 5 9
@@ -89,6 +105,20 @@ python -m lecture_ai knowledge <session_id> --dry-run
 python -m lecture_ai draft <session_id>              # 只接受正式 outline + knowledge
 python -m lecture_ai draft <session_id> --dry-run
 ```
+
+`export-package` **只接受正式 `transcript_repaired.md`**，缺失时明确失败，不会悄悄
+回退 RAW。新包默认输出到：
+
+```text
+<paths.export_dir>\
+  日期_时间_课程名_序号\
+```
+
+包内转录、板书、课件、提示词和 manifest 的文件名同样带日期、时间和课程名；
+GPT 网页版建议输出名统一为 `日期_时间_课程名_序号_final_note.md`。
+Session 的 `images/` 与 `slides/` 内材料视为已明确归属；其他位置的材料必须通过
+`--board` / `--slides` 指定。`data/incoming/images/` 里无法归属的照片只写 warning，
+绝不按时间或文件名猜。
 
 产物在 `data/sessions/<session_id>/transcript/`：
 

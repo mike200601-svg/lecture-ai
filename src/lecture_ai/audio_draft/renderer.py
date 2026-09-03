@@ -22,8 +22,8 @@ def render_audio_draft(
     maps = {
         category: {str(item["id"]): item for item in knowledge[category]}
         for category in (
-            "concepts", "equations", "examples", "teacher_emphasis", "exam_tips",
-            "common_errors", "open_questions", "uncertain_items",
+            "concepts", "equations", "derivations", "examples", "teacher_emphasis",
+            "exam_tips", "common_errors", "open_questions", "uncertain_items",
         )
     }
     maps["visual_references"] = {
@@ -63,6 +63,7 @@ def render_audio_draft(
         ])
         _render_concepts(lines, section["concept_ids"], maps["concepts"])
         _render_equations(lines, section["equation_ids"], maps["equations"])
+        _render_derivations(lines, section["derivation_ids"], maps["derivations"])
         _render_examples(lines, section["example_ids"], maps["examples"])
         _render_callouts(
             lines, section["teacher_emphasis_ids"], maps["teacher_emphasis"],
@@ -130,6 +131,43 @@ def _render_equations(lines: list[str], ids: list[str], mapping: dict[str, dict]
             ])
             for reason in item.get("uncertain") or []:
                 lines.append(f"> - {_md(reason)}")
+
+
+def _render_derivations(lines: list[str], ids: list[str], mapping: dict[str, dict]) -> None:
+    """推导按步骤逐条渲染。
+
+    这一层是 Phase 2 的核心价值：老师的推理链本身，而不是它的结论。把 steps 压
+    成一句话等于丢掉推导——A/B 对照里 A 输给直接整理，根因就在这里。
+    """
+    if not ids:
+        return
+    lines.extend(["", "### 推导过程", ""])
+    for item_id in ids:
+        item = mapping[item_id]
+        evidence = _sources(item["source_segment_ids"])
+        incomplete = item["status"] != "complete"
+        header = f"**{_md(item['name'])}**"
+        if incomplete:
+            lines.extend([
+                "> [!question] 推导尚未核验",
+                f"> {header} {evidence}",
+                f"> 状态：{item['status']}",
+            ])
+            for index, step in enumerate(item["steps"], start=1):
+                lines.append(f"> {index}. {_md(step)}")
+            lines.append(f"> → **结论**：{_md(item['conclusion'])}")
+            for reason in item.get("uncertain") or []:
+                lines.append(f"> - {_md(reason)}")
+            lines.append("")
+            continue
+        lines.append(f"{header} {evidence}")
+        lines.append("")
+        for index, step in enumerate(item["steps"], start=1):
+            lines.append(f"{index}. {_md(step)}")
+        lines.append("")
+        lines.append(f"→ **结论**：{_md(item['conclusion'])}")
+        _append_uncertainty(lines, item.get("uncertain") or [])
+        lines.append("")
 
 
 def _render_examples(lines: list[str], ids: list[str], mapping: dict[str, dict]) -> None:

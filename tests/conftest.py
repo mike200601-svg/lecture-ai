@@ -121,6 +121,10 @@ def project_root(tmp_path: Path) -> Path:
     (root / "prompts" / "lecture_note.md").write_text(
         draft_prompt.read_text(encoding="utf-8"), encoding="utf-8"
     )
+    export_prompt = Path(__file__).resolve().parents[1] / "prompts" / "export_session.md"
+    (root / "prompts" / "export_session.md").write_text(
+        export_prompt.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     (root / "pyproject.toml").write_text("[project]\nname='t'\n", encoding="utf-8")
     return root
 
