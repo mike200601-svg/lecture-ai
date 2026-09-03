@@ -7,7 +7,7 @@
 | Phase | 内容 | 状态 |
 |---|---|---|
 | Phase 0 | 工程骨架 | ✅ 完成 |
-| Phase 1 | 音频自动转录 MVP | 🟡 连续真实课堂验收 2/3；第二节口音场景仍需 Phase 2 清洗 |
+| Phase 1 | 音频自动转录 MVP | ✅ 连续真实课堂验收 3/3；含口音与轻声/杂音场景 |
 | Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
 | Phase 2A | 忠实 Transcript Cleaning | 🟡 三片 GPT 网页 Canary PASS；Gold 全量清洗待运行 |
 | Phase 2B/C/D | 结构、知识、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
@@ -19,6 +19,13 @@
 ---
 
 ## 2026-09-02：GPT 网页 Canary 与第二节真实录音
+
+- GPT 网页正式清洗新增无人值守批处理交换：watcher 自动汇总未完成 chunk/boundary，向
+  `data/web_exchange/<session>/to_phone/` 输出整包，监听 `from_phone/` 返回 ZIP，逐项验签、
+  schema/拓扑/长度校验、隔离坏项并续跑；全部通过后只推进到 Phase 2A QA 就绪。
+- 新增独立双向 Syncthing 文件夹 `lecture-web-exchange`，不会改变稳定的单向录音同步链。
+- Gold 当前已正式接受 chunk 000，并复用 Canary 002/005/009；余下 8 个 chunk 将由整包
+  网页流程处理，不再逐段人工搬运。
 
 - 默认文本 provider 改为 `chatgpt_web/chatgpt-web-high`；无需 OpenAI SDK 或 API key。
 - 新增网页交换适配器、严格 `response.json` 导入、旧 prompt 响应封存和字符/网页轮次审计。
@@ -42,7 +49,7 @@
 - chunk 09 对约 311 秒公式原声做了 no-VAD 隔离复核，确认幂展开与十六进制示例后续 F
   有连续语音证据。用户明确选择信任 GPT 5.6 的保守上下文恢复并接受原回复，不启用一刀切
   的公式 token 硬锁；`173 ÷ 2` 的 80 → 86 修正及其证据差异已披露并记录。
-- 完整测试：**249 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
+- 完整测试：**259 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
   medium/large-v3-turbo 缓存 partial 与无 CUDA 均为已知 WARN；配置中的本地 medium READY。
 
 ---

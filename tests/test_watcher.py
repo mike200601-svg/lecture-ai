@@ -104,3 +104,17 @@ def test_watch_stops_on_request(config, pipeline):
     watcher.request_stop()
     assert watcher.run(max_iterations=10) == 0
     assert pipeline.sessions.list_ids() == []  # 立刻停止，什么都没处理
+
+
+def test_watch_runs_web_batch_maintenance(config, pipeline):
+    class StubWebBatches:
+        calls = 0
+
+        def run_once(self):
+            self.calls += 1
+            return []
+
+    batches = StubWebBatches()
+    watcher = Watcher(config, pipeline, web_batches=batches)
+    assert watcher.run(max_iterations=1) == 0
+    assert batches.calls == 1

@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from lecture_ai.config import Config
+from lecture_ai.cleaning.web_batch import CleanWebBatchService
 from lecture_ai.errors import LectureAIError
 from lecture_ai.logging_setup import get_logger
 from lecture_ai.pipeline.phase1 import Phase1Pipeline
@@ -75,9 +76,15 @@ def _pid_alive(pid: int) -> bool:
 
 
 class Watcher:
-    def __init__(self, config: Config, pipeline: Phase1Pipeline | None = None) -> None:
+    def __init__(
+        self,
+        config: Config,
+        pipeline: Phase1Pipeline | None = None,
+        web_batches: CleanWebBatchService | None = None,
+    ) -> None:
         self.config = config
         self.pipeline = pipeline or Phase1Pipeline(config)
+        self.web_batches = web_batches or CleanWebBatchService(config)
         self._stop = False
 
     def request_stop(self, *_args) -> None:
@@ -108,6 +115,8 @@ class Watcher:
                             log.info("✔ %s 处理完成（%s）", o.session_id, o.message)
                         else:
                             log.error("✘ %s 处理失败：%s", o.session_id, o.message)
+                    for batch in self.web_batches.run_once():
+                        log.info("GPT 网页批处理 · %s · %s", batch.session_id, batch.message)
                 except LectureAIError as exc:
                     # 业务异常不能打断长驻循环，记录后继续
                     log.error("本轮处理出错（将继续运行）：%s", exc)

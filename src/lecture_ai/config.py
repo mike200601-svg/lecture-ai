@@ -34,6 +34,7 @@ class PathsConfig:
     project_root: Path
     incoming_audio: Path
     incoming_images: Path
+    web_exchange: Path
     session_dir: Path
     processed_dir: Path
     cache_dir: Path
@@ -204,6 +205,7 @@ class Config:
         for p in (
             self.paths.incoming_audio,
             self.paths.incoming_images,
+            self.paths.web_exchange,
             self.paths.session_dir,
             self.paths.processed_dir,
             self.paths.cache_dir,
@@ -301,6 +303,7 @@ def load_config(config_path: Path | None = None, project_root: Path | None = Non
         project_root=root,
         incoming_audio=_resolve_path(p.get("incoming_audio", "data/incoming/audio"), root),
         incoming_images=_resolve_path(p.get("incoming_images", "data/incoming/images"), root),
+        web_exchange=_resolve_path(p.get("web_exchange", "data/web_exchange"), root),
         session_dir=_resolve_path(p.get("session_dir", "data/sessions"), root),
         processed_dir=_resolve_path(p.get("processed_dir", "data/processed"), root),
         cache_dir=_resolve_path(p.get("cache_dir", "data/cache"), root),

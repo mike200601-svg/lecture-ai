@@ -23,6 +23,7 @@ MINIMAL_CONFIG = """
 paths:
   incoming_audio: data/incoming/audio
   incoming_images: data/incoming/images
+  web_exchange: data/web_exchange
   session_dir: data/sessions
   processed_dir: data/processed
   cache_dir: data/cache

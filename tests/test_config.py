@@ -15,6 +15,7 @@ def test_load_minimal_config(config, project_root):
     assert config.paths.project_root == project_root
     assert config.paths.incoming_audio.is_absolute()
     assert config.paths.incoming_audio == project_root / "data" / "incoming" / "audio"
+    assert config.paths.web_exchange == project_root / "data" / "web_exchange"
     assert config.transcription.provider == "fake"
 
 

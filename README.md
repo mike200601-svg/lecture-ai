@@ -108,6 +108,20 @@ prompt 更新时旧 response/cache/CLEANED 会改名封存，不会静默覆盖�
 不额外使用会阻止正常上下文纠错的 token 硬锁。
 可选 `openai` API provider 仍保留，只有使用它时才从 `.env` 读取 `OPENAI_API_KEY`。
 
+正式全量清洗使用批处理交换，不再逐 chunk 人工搬运。只要某个 Session 已经生成
+`analysis/clean_web/` 任务，常驻 `watch` 会自动：
+
+1. 把所有未完成 chunk/boundary 合并成带 manifest 和指纹的 ZIP；
+2. 将 ZIP 写入 `data/web_exchange/<session>/to_phone/`；
+3. 监听 `data/web_exchange/<session>/from_phone/`；
+4. 对返回包逐项校验，合格项进正式 cache，不合格项封存并自动生成下一份返工包；
+5. 全部通过后自动组装 `transcript_clean.json/.md`，把状态置为
+   `ready_for_phase2a_qa`。Phase 2B 不会自动越级启动。
+
+ZIP 内的 `README.md` 是给 GPT 网页的完整任务说明。把整包上传给 GPT，下载它返回的 ZIP，
+原样放进 `from_phone/` 即可；不得修改或丢弃 `manifest.json`。共享目录中的 `state.json`
+可直接在手机查看当前批次、待处理项和最终产物状态。
+
 ### 5. 手机自动同步（当前正式方案）
 
 手机端使用 Syncthing-Fork，电脑端使用 Syncthing 2.1.3：
@@ -118,6 +132,18 @@ Android /storage/emulated/0/Sounds（Send Only）
   → data/incoming/audio（Receive Only）
   → LectureAI Watch
 ```
+
+网页批处理另用独立的双向 Syncthing 文件夹 `lecture-web-exchange`：
+
+```text
+电脑 data/web_exchange（Send & Receive）
+  ↔ Syncthing 动态发现 / 中继
+  ↔ Android 自选目录（Send & Receive）
+```
+
+录音目录继续保持单向，绝不为了传网页作业而修改它。手机首次收到
+`lecture-web-exchange` 邀请时，只需接受、选择一个容易找到的本地目录并保持
+Send & Receive；之后任务包、返回包和 `state.json` 均自动同步。
 
 - 手机录音机可继续使用原生 M4A，不需要改文件名或手动复制。
 - 手机可以熄屏；Syncthing-Fork 已允许后台运行、移动数据和计量 Wi-Fi。

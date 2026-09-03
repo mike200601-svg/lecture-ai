@@ -7,6 +7,7 @@
 paths:
   incoming_audio: data/incoming/audio
   incoming_images: data/incoming/images     # Phase 3 才会用
+  web_exchange: data/web_exchange           # 与手机双向同步：GPT 批处理包往返
   session_dir: data/sessions
   processed_dir: data/processed
   cache_dir: data/cache

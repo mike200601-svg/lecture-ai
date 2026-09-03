@@ -3,7 +3,7 @@
 > 日期：2026-09-02  
 > 当前主线：Phase 2A Transcript Cleaning  
 > 总结：Phase 0、Phase 1 核心链路、Phase 1.5 与 Phase 2A Canary 已完成；正式 Gold
-> CLEANED 尚未生成。
+> CLEANED 尚未生成；Phase 1 连续真实课堂验收现已完成 3/3。
 
 ## 一、当前结论
 
@@ -21,11 +21,11 @@ Gold Session 的三个 Canary 样本（chunk 002 / 005 / 009，约 24 分钟、4
 |---|---|---|
 | Phase 0 工程骨架 | 完成 | 配置、数据库、Session、日志、CLI、测试与 Git 回滚点齐全 |
 | Phase 1 自动录音转录 | 核心完成 | 手机到电脑再到本地 Whisper 的真实长课链路已跑通 |
-| Phase 1 连续课堂验收 | 2/3 | 已有两节 94–100 分钟真实课；第三节长录音尚未进入 incoming |
+| Phase 1 连续课堂验收 | 3/3 | 数字电路、量子力学、大数据三节真实长课均完成自动链路 |
 | Phase 1.5 选择性修复 | 完成 | 数字电路与量子力学真实长课均完成异常检测/修复 |
 | Phase 2A 工程实现 | 完成 | 分块、网页任务包、严格 schema、缓存、边界协调和 provenance 齐全 |
 | Phase 2A Canary | PASS | chunk 002 / 005 / 009 全部通过 |
-| Phase 2A Gold 全量 | 未运行 | 12 个块及必要的边界协调等待执行 |
+| Phase 2A Gold 全量 | 进行中 | 000、002、005、009 已接受；余下 8 块转为整包网页交换 |
 | Phase 2B/C/D | 未实现 | 只有架构、Prompt 与测试计划 |
 | Phase 3 板书融合 | 未开始 | 仅有占位目录/设计 |
 | Phase 4 Obsidian | 未开始 | 尚未写入 Vault |
@@ -72,7 +72,7 @@ chunk 009 的公式恢复经过额外说明和约 311 秒 no-VAD 原声复核。
 - Python 3.13.14，项目根 `.venv`。
 - 本地 `faster-whisper-medium` READY，CPU/int8 实际加载成功；无 NVIDIA/CUDA 是已知条件。
 - Hugging Face medium / large-v3-turbo 缓存 partial 不影响当前本地 medium 正式链路。
-- 完整测试：249 passed。
+- 完整测试：259 passed。
 - `doctor`：关键项 OK；`pip check`：无依赖冲突；`git diff --check`：通过。
 - 隐私：云端音频 false、云端图片 false、云端文本 true。
 - 正式数据未提交 Git；模型、录音、数据库和 Session 数据继续由 `.gitignore` 排除。
@@ -85,7 +85,7 @@ chunk 009 的公式恢复经过额外说明和约 311 秒 no-VAD 原声复核。
 
 ## 六、当前没有做的内容
 
-- 没有正式 Gold `transcript_clean.json/.md`。
+- 没有正式 Gold `transcript_clean.json/.md`；整包返回并通过后由 watcher 自动组装。
 - 没有 Phase 2B 章节结构产物。
 - 没有 Phase 2C 知识抽取或未解决视觉引用产物。
 - 没有 Phase 2D audio-only 笔记草稿。
@@ -95,9 +95,9 @@ chunk 009 的公式恢复经过额外说明和约 311 秒 no-VAD 原声复核。
 
 ### A. 完成 Gold Phase 2A 全量清洗（推荐）
 
-运行全部 12 个 GPT 网页块并处理必要的冲突边界，最终生成正式 CLEANED。Canary 的
-chunk 002 / 005 / 009 回复可以按 prompt SHA 校验后复用，因此预计只需新增 9 个网页块，
-外加少量可能出现的边界协调回复。
+由 watcher 汇总全部未完成块并处理必要的冲突边界，最终生成正式 CLEANED。Canary 的
+chunk 002 / 005 / 009 已按完整指纹复用，chunk 000 也已正式接受；余下 8 块统一装入一个
+手机可见的 ZIP，整包交给 GPT 网页后把返回 ZIP 放回即可，不再逐段搬运。
 
 完成标准：
 
@@ -106,10 +106,10 @@ chunk 002 / 005 / 009 回复可以按 prompt SHA 校验后复用，因此预计�
 - 抽查公式、重复、prompt echo、视觉引用、长推理等 10 类窗口；
 - 不使用 FakeLLM，不跳过网页回复校验。
 
-### B. 等第三节真实课堂录音，完成 Phase 1 连续 3/3 验收
+### B. Phase 1 连续 3/3 验收（已完成）
 
-当前 incoming 只有 2026-09-01 数字电路和 2026-09-02 量子力学两节长录音。第三节录音
-到达后可继续验证手机同步、watcher 去重、自动 Session 创建和长课稳定性。
+第三节大数据录音已完成同步、自动 Session 创建、本地转录与选择性修复。老师未使用扩音器、
+课堂椅子杂音较多，但整条 Phase 1 链路稳定完成。
 
 ### C. 对量子力学做 Phase 2A Canary
 
@@ -126,7 +126,7 @@ Gold 正式 CLEANED 产出后进行，避免同时维护两条人工网页任务
 
 1. Gold Session 全量 12 块清洗并生成正式 CLEANED。
 2. 完成 Gold 的 10 类人工抽查与首段漏识别的增量处理方案。
-3. 第三节录音到达时完成 Phase 1 连续 3/3 验收。
+3. Phase 1 连续 3/3 已完成，不再占用主线。
 4. 对量子力学做口音场景 Phase 2A Canary。
 5. 再进入 Phase 2B 章节结构识别；Phase 2C/D 与 Obsidian 后移。
 
