@@ -600,6 +600,8 @@ class CleanPipeline:
             client,
             force,
             request_context={
+                "pipeline": "clean",
+                "artifact": CLEAN_JSON,
                 "stage": "chunk",
                 "index": plan.index,
                 "session_id": session_id,
@@ -608,6 +610,8 @@ class CleanPipeline:
                 "source_sha256": source_sha,
                 "clean_fingerprint": fingerprint,
                 "clean_schema_version": CLEAN_SCHEMA_VERSION,
+                "fingerprint": fingerprint,
+                "schema_version": CLEAN_SCHEMA_VERSION,
                 "chunk": plan.to_dict(),
                 "exchange_dir": exchange_dir or (
                     session_dir / "analysis" / "clean_web"
@@ -789,8 +793,12 @@ class CleanPipeline:
                     client,
                     force,
                     request_context={
+                        "pipeline": "clean",
+                        "artifact": CLEAN_JSON,
                         "stage": "boundary",
                         "index": f"{left_index}-{right_index}",
+                        "fingerprint": fingerprint,
+                        "schema_version": CLEAN_SCHEMA_VERSION,
                         "exchange_dir": exchange_dir,
                     },
                 )

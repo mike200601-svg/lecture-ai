@@ -22,6 +22,7 @@ from lecture_ai.database import Database
 from lecture_ai.errors import LLMError
 from lecture_ai.logging_setup import get_logger
 from lecture_ai.session import SessionManager
+from lecture_ai.structure.pipeline import StructurePipeline
 from lecture_ai.utils.hashing import sha256_file
 from lecture_ai.utils.paths import atomic_write_text, ensure_dir, unique_path
 from lecture_ai.utils.timefmt import now_local, to_iso
@@ -79,6 +80,28 @@ class CleanWebBatchService:
         waiting = [item for item in outcome.chunks if item.get("waiting")]
         if not waiting:
             raise LLMError("清洗仍为 partial，但没有可打包的网页任务")
+        return self._package_waiting(session_id, waiting)
+
+    def prepare_structure(self, session_id: str) -> WebBatchOutcome:
+        """续跑 Phase 2B，并把待返回的 outline 任务送入同一手机交换区。"""
+        outcome = StructurePipeline(self.config, self.db).run(session_id)
+        if not outcome.partial:
+            result = WebBatchOutcome(
+                session_id=session_id,
+                status="ready_for_phase2b_qa",
+                message="课堂结构已生成，等待 Phase 2B QA",
+                output_json=outcome.output_json,
+            )
+            self._write_state(result)
+            return result
+        waiting = [item for item in outcome.tasks if item.get("waiting")]
+        if not waiting:
+            raise LLMError("结构识别仍为 partial，但没有可打包的网页任务")
+        return self._package_waiting(session_id, waiting)
+
+    def _package_waiting(
+        self, session_id: str, waiting: list[dict[str, Any]]
+    ) -> WebBatchOutcome:
         tasks = [self._task_manifest(item) for item in waiting]
         immutable = {
             "schema_version": BATCH_SCHEMA_VERSION,
@@ -104,6 +127,11 @@ class CleanWebBatchService:
                 )
                 self._write_state(result)
                 return result
+        for previous in (shared_root / "to_phone").glob("*.zip"):
+            if previous.name == package_zip.name:
+                continue
+            archived = unique_path(ensure_dir(root / "superseded") / previous.name)
+            shutil.move(str(previous), str(archived))
         ensure_dir(package_dir / "tasks")
         ensure_dir(package_dir / "responses")
 
@@ -181,7 +209,16 @@ class CleanWebBatchService:
             str(task["task_id"]): self._cache_path(session_id, task).exists()
             for task in local_manifest["tasks"]
         }
-        outcome = self.pipeline.run(session_id)
+        pipelines = {str(task.get("pipeline") or "clean") for task in local_manifest["tasks"]}
+        if len(pipelines) != 1:
+            raise LLMError("一个网页返回包不能混合多个 pipeline")
+        pipeline_name = next(iter(pipelines))
+        if pipeline_name == "clean":
+            outcome = self.pipeline.run(session_id)
+        elif pipeline_name == "structure":
+            outcome = StructurePipeline(self.config, self.db).run(session_id)
+        else:
+            raise LLMError(f"返回包包含未知 pipeline：{pipeline_name}")
         accepted = sum(
             not before[str(task["task_id"])]
             and self._cache_path(session_id, task).exists()
@@ -190,19 +227,32 @@ class CleanWebBatchService:
         rejected = max(0, staged - accepted)
 
         if not outcome.partial:
+            status = (
+                "ready_for_phase2a_qa" if pipeline_name == "clean"
+                else "ready_for_phase2b_qa"
+            )
+            message = (
+                "返回包全部处理完成；正式 CLEANED 已组装，等待 Phase 2A QA"
+                if pipeline_name == "clean"
+                else "返回包全部处理完成；课堂结构已生成，等待 Phase 2B QA"
+            )
             result = WebBatchOutcome(
                 session_id=session_id,
-                status="ready_for_phase2a_qa",
-                message="返回包全部处理完成；正式 CLEANED 已组装，等待 Phase 2A QA",
+                status=status,
+                message=message,
                 accepted=accepted,
                 rejected=rejected,
                 output_json=outcome.output_json,
-                output_md=outcome.output_md,
+                output_md=getattr(outcome, "output_md", None),
             )
             self._write_state(result)
             return result
 
-        followup = self.prepare(session_id)
+        followup = (
+            self.prepare(session_id)
+            if pipeline_name == "clean"
+            else self.prepare_structure(session_id)
+        )
         followup.accepted = accepted
         followup.rejected = rejected
         followup.message = (
@@ -239,7 +289,11 @@ class CleanWebBatchService:
             if not processed_response:
                 try:
                     previous = self._read_state(session_id)
-                    maintained = self.prepare(session_id)
+                    session_dir = self.sessions.session_dir(session_id)
+                    if not (session_dir / "analysis" / "transcript_clean.json").is_file():
+                        maintained = self.prepare(session_id)
+                    else:
+                        maintained = self.prepare_structure(session_id)
                     if self._state_signature(previous) != self._state_signature(
                         maintained.__dict__
                     ):
@@ -249,14 +303,18 @@ class CleanWebBatchService:
         return results
 
     def _active_session_ids(self) -> list[str]:
-        return [
-            session_id
-            for session_id in self.sessions.list_ids()
-            if (self.sessions.session_dir(session_id) / "analysis" / "clean_web").is_dir()
-            and not (
-                self.sessions.session_dir(session_id) / "analysis" / "transcript_clean.json"
+        active: list[str] = []
+        for session_id in self.sessions.list_ids():
+            analysis = self.sessions.session_dir(session_id) / "analysis"
+            cleaning = (analysis / "clean_web").is_dir() and not (
+                analysis / "transcript_clean.json"
             ).is_file()
-        ]
+            structuring = (analysis / "structure_web").is_dir() and not (
+                analysis / "outline.json"
+            ).is_file()
+            if cleaning or structuring:
+                active.append(session_id)
+        return active
 
     def _root(self, session_id: str) -> Path:
         return self.sessions.session_dir(session_id) / "analysis" / BATCH_ROOT
@@ -294,9 +352,15 @@ class CleanWebBatchService:
         exchange_dir = Path(str(waiting["prompt"])).parent
         request_path = exchange_dir / "request.json"
         request = json.loads(request_path.read_text(encoding="utf-8"))
-        task_id = exchange_dir.name
+        pipeline_name = str(request.get("pipeline") or waiting.get("pipeline") or "clean")
+        task_id = (
+            exchange_dir.name if pipeline_name == "clean"
+            else f"{pipeline_name}_{exchange_dir.name}"
+        )
         return {
             "task_id": task_id,
+            "pipeline": pipeline_name,
+            "artifact": request.get("artifact"),
             "stage": request.get("stage"),
             "index": request.get("index"),
             "prompt_sha256": request.get("prompt_sha256"),
@@ -305,6 +369,9 @@ class CleanWebBatchService:
             "source_sha256": request.get("source_sha256"),
             "clean_fingerprint": request.get("clean_fingerprint"),
             "clean_schema_version": request.get("clean_schema_version"),
+            "fingerprint": request.get("fingerprint"),
+            "schema_version": request.get("schema_version"),
+            "exchange_name": exchange_dir.name,
             "prompt_file": f"tasks/{task_id}/prompt.md",
             "schema_file": f"tasks/{task_id}/schema.json",
             "request_file": f"tasks/{task_id}/request.json",
@@ -330,8 +397,9 @@ class CleanWebBatchService:
             raise LLMError(f"当前网页任务不存在：{exchange_dir.name}")
         request = json.loads(request_path.read_text(encoding="utf-8"))
         for key in (
-            "stage", "index", "prompt_sha256", "schema_sha256", "source_layer",
-            "source_sha256", "clean_fingerprint", "clean_schema_version",
+            "pipeline", "artifact", "stage", "index", "prompt_sha256", "schema_sha256",
+            "source_layer", "source_sha256", "clean_fingerprint", "clean_schema_version",
+            "fingerprint", "schema_version",
         ):
             if request.get(key) != task.get(key):
                 raise LLMError(f"{exchange_dir.name} 的 {key} 已变化，返回包已过期")
@@ -341,19 +409,24 @@ class CleanWebBatchService:
             raise LLMError(f"{exchange_dir.name} 当前 schema 文件哈希不匹配")
 
     def _exchange_dir(self, session_id: str, task: dict[str, Any]) -> Path:
-        return (
-            self.sessions.session_dir(session_id)
-            / "analysis" / "clean_web" / str(task["task_id"])
+        pipeline_name = str(task.get("pipeline") or "clean")
+        folder = "clean_web" if pipeline_name == "clean" else "structure_web"
+        return self.sessions.session_dir(session_id) / "analysis" / folder / str(
+            task.get("exchange_name") or task["task_id"]
         )
 
     def _cache_path(self, session_id: str, task: dict[str, Any]) -> Path:
         index = task["index"]
-        if task["stage"] == "chunk":
+        pipeline_name = str(task.get("pipeline") or "clean")
+        if pipeline_name == "structure":
+            name = "structure_cache.json"
+        elif task["stage"] == "chunk":
             name = f"chunk_{int(index):03d}.json"
         else:
             left, right = (int(value) for value in str(index).split("-", 1))
             name = f"boundary_{left:03d}_{right:03d}.json"
-        return self.sessions.session_dir(session_id) / "analysis" / "clean_cache" / name
+        analysis = self.sessions.session_dir(session_id) / "analysis"
+        return analysis / name if pipeline_name == "structure" else analysis / "clean_cache" / name
 
 
 class _PackageReader:
@@ -430,7 +503,7 @@ def _render_readme(manifest: dict[str, Any]) -> str:
         f"- `{task['task_id']}` → `{task['response_file']}`"
         for task in manifest["tasks"]
     )
-    return f"""# ChatGPT 网页批量清洗作业
+    return f"""# ChatGPT 网页批量课堂处理作业
 
 请完整处理本压缩包中的 {len(manifest['tasks'])} 个独立任务。
 

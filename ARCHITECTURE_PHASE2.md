@@ -16,7 +16,7 @@ RAW -> REPAIRED -> CLEANED -> STRUCTURED -> NOTE
 | RAW | `transcript/transcript_raw.{json,md}` | Phase 1 原始 ASR，证据层，只读 | 已实现、不可覆盖 |
 | REPAIRED | `transcript/transcript_repaired.{json,md}` | 只重转录异常时间窗 | Phase 1.5 实现 |
 | CLEANED | `analysis/transcript_clean.{json,md}` | 忠实纠错、断句、标点与不确定性标记 | Phase 2A 实现 |
-| STRUCTURED | `analysis/outline.json` | 课堂结构与时间范围 | Phase 2B，未实现 |
+| STRUCTURED | `analysis/outline.json` | 课堂结构与时间范围 | Phase 2B 工程已实现 |
 | KNOWLEDGE | `analysis/knowledge.json`、`analysis/unresolved_visual.json` | 知识项与待板书解析引用 | Phase 2C，未实现 |
 | NOTE | `note/lecture_audio_draft.md` | 仅基于音频的课堂草稿 | Phase 2D，未实现 |
 
@@ -136,18 +136,25 @@ lecture-ai clean  SESSION [--dry-run] [--chunk INDEX] [--force]
 所有命令可重复执行。`repair` 默认自动检测全部候选；`clean --chunk` 供诊断单块，但只有
 完整运行才组装最终 cleaned 产物。
 
-## 6. 后续阶段接口、Prompt 与测试计划（只设计，不实现）
+## 6. Phase 2B 实现与后续阶段接口
 
 ### Phase 2B：课堂结构识别
 
 输入 CLEANED，使用 `prompts/chapter_detection.md`，输出 `analysis/outline.json`。每个结构项
-必须带 `start/end` 和 `source_segment_ids`。计划 schema 包含：`lecture_topics`、`subtopics`、
+必须带 `start/end` 和 `source_segment_ids`。正式 schema 包含：`lecture_topics`、`subtopics`、
 `definitions`、`derivations`、`examples`、`teacher_emphasis`、`exam_tips`、`transitions`。
-不得直接读取 RAW 绕过 provenance。计划接口：
-`StructurePipeline.run(session_id) -> LectureOutline`。
+不得直接读取 RAW/REPAIRED 绕过 provenance。接口：
+`StructurePipeline.run(session_id) -> StructureOutcome`，正式结构载荷写入 `outline.json`。
 
-测试计划：固定 FakeLLM 响应做 schema/时间范围/source id 校验；故意返回越界时间、未知 id、
-重叠章节和丢失推导，确认质量门拒绝；真实课堂抽查结构边界但不以标题漂亮作为验收依据。
+模型必须用 `lecture_topics.source_segment_ids` 按原顺序恰好覆盖全部 CLEANED segments；
+章节 id 不得遗漏、重复、越界或重排。时间范围由 validator 对照来源 segment 反查，所有
+子结构必须落在所属 topic 内。明确的“下面推导/证明”提示若未进入 `derivations`，质量门
+直接拒绝。输入 SHA、prompt SHA、schema、provider/model 共同进入缓存 fingerprint；CLEANED
+变化只使结构缓存失效，不回写任何上游层。
+
+`chatgpt_web` 会生成 `analysis/structure_web/outline/` 交换任务，并复用 Phase 2A 的手机双向
+批处理协议。返回包严格验签、校验；坏结果封存并生成返工包。当前 Gold CLEANED 尚未完成，
+因此只完成工程与 FakeLLM 测试，没有生成真实 `outline.json`。
 
 ### Phase 2C：结构化知识抽取
 
@@ -176,4 +183,4 @@ Phase 3 预留接口：`VisualResolver.resolve(reference, images_by_exif_time)`�
 测试计划：快照测试 note 结构；检查所有正文块有 provenance；视觉未决项必须呈现为
 `[!question]`，不得伪装成已解决；禁止生成 WikiLinks、Concept Notes 或写入 Obsidian Vault。
 
-以上 Phase 2B / 2C / 2D 均为接口与测试计划，**本轮不实现**。
+Phase 2C / 2D 仍只有接口与测试计划，尚未实现。

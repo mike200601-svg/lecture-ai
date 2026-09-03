@@ -1,7 +1,7 @@
 # Phase 1.5 / Phase 2 TODO
 
 > 当前边界：Phase 1.5 已完成；Phase 2A 工程实现与 GPT 网页 Canary 已通过；
-> Phase 2B/C/D 只设计。
+> Phase 2B 工程已实现但等待 Gold CLEANED 与真实验收；Phase 2C/D 只设计。
 
 ## Phase 1.5 Selective Transcript Repair
 
@@ -48,14 +48,16 @@
 当前停止点：三段 Canary 全部 PASS。下一步对 Gold Session 运行 12 个真实 GPT 网页清洗块
 及条件式边界协调；禁止用 FakeLLM 生成 Gold Session 的 `transcript_clean.json`。
 
-## Phase 2B Lecture Structure Detection — NOT IMPLEMENTED
+## Phase 2B Lecture Structure Detection — ENGINEERING COMPLETE
 
 未来输入：CLEANED。未来输出：`analysis/outline.json`。
 
-- [ ] 定稿 `prompts/chapter_detection.md`
-- [ ] 定义 `LectureOutline` schema 与 `StructurePipeline` 接口
-- [ ] 保留 topics/subtopics/time ranges/source ids/definitions/derivations/examples/emphasis/exam tips
-- [ ] FakeLLM schema、越界时间、未知 source id、章节覆盖率测试
+- [x] 定稿 `prompts/chapter_detection.md`
+- [x] 定义严格 outline schema 与 `StructurePipeline` 接口
+- [x] 保留 topics/subtopics/time ranges/source ids/definitions/derivations/examples/emphasis/exam tips
+- [x] FakeLLM schema、越界时间、未知 source id、章节覆盖率与丢失推导测试
+- [x] CLEANED 硬输入门、SHA/prompt/schema fingerprint、缓存与 source-change invalidation
+- [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
 - [ ] Gold Session 人工检查章节边界
 
 ## Phase 2C Structured Knowledge Extraction — NOT IMPLEMENTED
@@ -80,7 +82,7 @@
 
 ## 本轮明确不做
 
-- Phase 2B / 2C / 2D 代码
+- Phase 2C / 2D 代码
 - Phase 3 板书融合
 - VaultWriter、WikiLinks、Concept Notes、Course Index、知识图谱
 - 音频强降噪、新 DSP pipeline、外置麦克风方案

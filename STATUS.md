@@ -1,6 +1,6 @@
 # STATUS
 
-> 最后更新：2026-09-02
+> 最后更新：2026-09-03
 
 ## 总览
 
@@ -10,11 +10,25 @@
 | Phase 1 | 音频自动转录 MVP | ✅ 连续真实课堂验收 3/3；含口音与轻声/杂音场景 |
 | Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
 | Phase 2A | 忠实 Transcript Cleaning | 🟡 三片 GPT 网页 Canary PASS；Gold 全量清洗待运行 |
-| Phase 2B/C/D | 结构、知识、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
+| Phase 2B | 课堂结构识别 | 🟡 工程完成；等待 Gold CLEANED 后真实运行与验收 |
+| Phase 2C/D | 知识抽取、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
 | Phase 5 | 课程知识库 | ⬜ 未开始 |
 | Phase 6 | 搜索 / AI 问答 | ⬜ 未开始 |
+
+---
+
+## 2026-09-03：Phase 2B 工程实现
+
+- 定稿 `prompts/chapter_detection.md`，新增 `StructurePipeline` 与严格 outline schema。
+- Phase 2B 只接受正式 CLEANED，缺失时硬失败，禁止回退 RAW/REPAIRED。
+- `lecture_topics` 必须按原顺序恰好覆盖全部来源 segment；validator 拒绝遗漏、重复、未知 id、
+  非连续来源、越界时间、跨 topic 子结构和明确推导丢失。
+- `outline.json` 保存 CLEANED SHA、prompt SHA、fingerprint、provider/model、usage、request id、
+  cache hit/retry 和每项 `source_segment_ids`，不回写上游。
+- Phase 2B 网页任务复用手机双向批处理交换；watcher 能自动接收结构返回包并续跑。
+- 当前没有对 Gold 运行 FakeLLM，也没有在上游 CLEANED 缺失时生成正式 outline。
 
 ---
 
@@ -49,7 +63,7 @@
 - chunk 09 对约 311 秒公式原声做了 no-VAD 隔离复核，确认幂展开与十六进制示例后续 F
   有连续语音证据。用户明确选择信任 GPT 5.6 的保守上下文恢复并接受原回复，不启用一刀切
   的公式 token 硬锁；`173 ÷ 2` 的 80 → 86 修正及其证据差异已披露并记录。
-- 完整测试：**259 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
+- 完整测试：**272 passed**；doctor、`pip check` 与 `git diff --check` 通过。doctor 的
   medium/large-v3-turbo 缓存 partial 与无 CUDA 均为已知 WARN；配置中的本地 medium READY。
 
 ---
@@ -86,8 +100,8 @@
 - `9889fb2 add selective transcript repair`
 - `00ca616 add faithful transcript cleaning pipeline`
 
-Phase 2B/C/D **NOT IMPLEMENTED**。设计与测试计划见 `ARCHITECTURE_PHASE2.md`、
-`TODO_PHASE2.md`。
+（以上为 2026-09-01 当时的停止点；当前 Phase 2B 工程已实现，Phase 2C/D 仍未实现。）
+设计与测试计划见 `ARCHITECTURE_PHASE2.md`、`TODO_PHASE2.md`。
 
 ---
 

@@ -26,7 +26,8 @@ Gold Session 的三个 Canary 样本（chunk 002 / 005 / 009，约 24 分钟、4
 | Phase 2A 工程实现 | 完成 | 分块、网页任务包、严格 schema、缓存、边界协调和 provenance 齐全 |
 | Phase 2A Canary | PASS | chunk 002 / 005 / 009 全部通过 |
 | Phase 2A Gold 全量 | 进行中 | 000、002、005、009 已接受；余下 8 块转为整包网页交换 |
-| Phase 2B/C/D | 未实现 | 只有架构、Prompt 与测试计划 |
+| Phase 2B | 工程完成 | CLEANED 硬输入、严格结构 schema、缓存、网页整包与测试已实现 |
+| Phase 2C/D | 未实现 | 只有架构、Prompt 与测试计划 |
 | Phase 3 板书融合 | 未开始 | 仅有占位目录/设计 |
 | Phase 4 Obsidian | 未开始 | 尚未写入 Vault |
 
@@ -72,7 +73,7 @@ chunk 009 的公式恢复经过额外说明和约 311 秒 no-VAD 原声复核。
 - Python 3.13.14，项目根 `.venv`。
 - 本地 `faster-whisper-medium` READY，CPU/int8 实际加载成功；无 NVIDIA/CUDA 是已知条件。
 - Hugging Face medium / large-v3-turbo 缓存 partial 不影响当前本地 medium 正式链路。
-- 完整测试：259 passed。
+- 完整测试：272 passed。
 - `doctor`：关键项 OK；`pip check`：无依赖冲突；`git diff --check`：通过。
 - 隐私：云端音频 false、云端图片 false、云端文本 true。
 - 正式数据未提交 Git；模型、录音、数据库和 Session 数据继续由 `.gitignore` 排除。
@@ -86,7 +87,7 @@ chunk 009 的公式恢复经过额外说明和约 311 秒 no-VAD 原声复核。
 ## 六、当前没有做的内容
 
 - 没有正式 Gold `transcript_clean.json/.md`；整包返回并通过后由 watcher 自动组装。
-- 没有 Phase 2B 章节结构产物。
+- 没有真实 Phase 2B 章节结构产物；工程已完成，等待 Gold CLEANED。
 - 没有 Phase 2C 知识抽取或未解决视觉引用产物。
 - 没有 Phase 2D audio-only 笔记草稿。
 - 没有板书图片融合、Obsidian 写入、WikiLinks、概念卡片或知识图谱。

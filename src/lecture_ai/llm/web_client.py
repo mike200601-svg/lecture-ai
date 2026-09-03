@@ -74,6 +74,8 @@ class ChatGPTWebClient(LLMClient):
                 {
                     "provider": self.provider,
                     "model": self.model,
+                    "pipeline": context.get("pipeline"),
+                    "artifact": context.get("artifact"),
                     "stage": context.get("stage"),
                     "index": context.get("index"),
                     "prompt_sha256": prompt_sha,
@@ -85,6 +87,8 @@ class ChatGPTWebClient(LLMClient):
                     "source_sha256": context.get("source_sha256"),
                     "clean_fingerprint": context.get("clean_fingerprint"),
                     "clean_schema_version": context.get("clean_schema_version"),
+                    "fingerprint": context.get("fingerprint"),
+                    "schema_version": context.get("schema_version"),
                     "chunk": context.get("chunk"),
                     "created_at": to_iso(now_local()),
                     "response_file": "response.json",

@@ -3,15 +3,12 @@
 from lecture_ai.cleaning.chunking import build_chunk_plan
 from lecture_ai.cleaning.models import ChunkPlan, CleanOutcome
 from lecture_ai.cleaning.pipeline import CLEAN_JSON, CLEAN_MD, CleanPipeline
-from lecture_ai.cleaning.web_batch import CleanWebBatchService, WebBatchOutcome
 from lecture_ai.cleaning.schema import CLEAN_RESPONSE_SCHEMA, validate_clean_response
 
 __all__ = [
     "ChunkPlan",
     "CleanOutcome",
     "CleanPipeline",
-    "CleanWebBatchService",
-    "WebBatchOutcome",
     "CLEAN_JSON",
     "CLEAN_MD",
     "CLEAN_RESPONSE_SCHEMA",

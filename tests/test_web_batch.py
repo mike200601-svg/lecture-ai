@@ -12,9 +12,16 @@ import pytest
 from lecture_ai.cleaning.web_batch import CleanWebBatchService
 from lecture_ai.errors import LLMError
 from tests.test_cleaning import _faithful_responder, _make_session
+from tests.test_structure import _outline, _source, _write_cleaned
 
 
-def _return_directory(package_dir: Path, target: Path, *, invalid: set[str] | None = None) -> Path:
+def _return_directory(
+    package_dir: Path,
+    target: Path,
+    *,
+    invalid: set[str] | None = None,
+    responder=_faithful_responder,
+) -> Path:
     invalid = invalid or set()
     target.mkdir(parents=True)
     shutil.copy2(package_dir / "manifest.json", target / "manifest.json")
@@ -27,7 +34,7 @@ def _return_directory(package_dir: Path, target: Path, *, invalid: set[str] | No
             payload = {"segments": []}
         else:
             prompt = (package_dir / task["prompt_file"]).read_text(encoding="utf-8")
-            payload = _faithful_responder(prompt)
+            payload = responder(prompt)
         response.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return target
 
@@ -117,3 +124,26 @@ def test_batch_rejects_tampered_manifest(config, db, tmp_path):
 
     with pytest.raises(LLMError, match="manifest"):
         service.receive(meta.session_id, returned)
+
+
+def test_structure_task_uses_same_phone_batch_and_auto_resumes(config, db, tmp_path):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    source = _source()
+    _write_cleaned(session_dir, meta.session_id, source)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    service = CleanWebBatchService(config, db)
+
+    prepared = service.prepare_structure(meta.session_id)
+    returned = _return_directory(
+        Path(prepared.package_dir),
+        tmp_path / "returned_structure",
+        responder=lambda _: _outline(source),
+    )
+    outcome = service.receive(meta.session_id, returned)
+
+    assert prepared.task_ids == ["structure_outline"]
+    assert outcome.status == "ready_for_phase2b_qa"
+    assert outcome.accepted == 1 and outcome.rejected == 0
+    assert (session_dir / "analysis" / "outline.json").exists()

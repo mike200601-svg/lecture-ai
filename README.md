@@ -81,6 +81,8 @@ python -m lecture_ai repair <session_id> --dry-run
 python -m lecture_ai clean <session_id>    # REPAIRED 优先，缺失时读 RAW
 python -m lecture_ai clean <session_id> --dry-run
 python -m lecture_ai clean-canary <session_id> --chunks 2 5 9
+python -m lecture_ai structure <session_id>          # 只接受正式 CLEANED
+python -m lecture_ai structure <session_id> --dry-run
 ```
 
 产物在 `data/sessions/<session_id>/transcript/`：
@@ -121,6 +123,11 @@ prompt 更新时旧 response/cache/CLEANED 会改名封存，不会静默覆盖�
 ZIP 内的 `README.md` 是给 GPT 网页的完整任务说明。把整包上传给 GPT，下载它返回的 ZIP，
 原样放进 `from_phone/` 即可；不得修改或丢弃 `manifest.json`。共享目录中的 `state.json`
 可直接在手机查看当前批次、待处理项和最终产物状态。
+
+Phase 2B 的 `structure` 命令只读取正式 `analysis/transcript_clean.json`，缺失时直接失败，
+不会回退 RAW/REPAIRED。输出为 `analysis/outline.json`：章节必须按顺序恰好覆盖全部 CLEANED
+segment；子主题、定义、推导、例题、强调、考试提示和过渡都带来源 id 与时间范围。网页
+结果同样进入上述手机整包通道，返回后由 watcher 自动校验并续跑。
 
 ### 5. 手机自动同步（当前正式方案）
 
