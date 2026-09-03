@@ -2,7 +2,56 @@
 
 > 最后更新：2026-09-03
 
-## 总览
+# CURRENT STATUS
+
+> 本节是当前唯一权威状态。下方 `HISTORICAL LOG` 全部是历史快照，
+> 其中的「待办」「下一步」只反映当时情形，**不要当成当前任务**。
+
+- **Phase 1：PASS / Production Verified**，连续真实课堂 3/3（含口音、轻声/杂音场景）。
+  历史记录里"等待第三节课堂"之类的阻塞项均已完成，不再有效。
+- **Phase 1.5：完成**，Gold Session 真实课堂 16 windows / 16 accepted / 0 rejected。
+- **Phase 2A：PASS**。Gold 正式 `transcript_clean.json/.md` 已生成：1447/1447 来源
+  segment 全覆盖、无遗漏重复未知、时间轴与 REPAIRED 完全一致；12 chunks + 11 boundaries
+  （5 deterministic / 6 网页）全部通过严格校验。人工 QA：serious hallucination 0、
+  serious information loss 0、fabricated formula 0、reasoning loss 0、traceability failure 0。
+- **Phase 2B：PASS**。正式 `outline.json` 已生成：17 topics、1447 segment 恰好覆盖一次、
+  来源连续、时间规则 0 violation、121 项子结构 0 越界；章节边界逐个对照原文，
+  全部落在老师自己的转场话上。
+- **Phase 2C：进行中**，等待手机网页返回。第一份返回包被严格校验拒收，
+  已按流程重跑（见下方"2026-09-03 首次真实 2C 拒收"）。
+- **Phase 2D：未运行**，上游 knowledge 尚未产出。
+- **Phase 3 / 4 / 5 / 6：未开始**，本轮明确不实现。
+
+当前唯一阻塞：`data/web_exchange/2026-09-01_unknown_001/to_phone/` 下的 Phase 2C 任务包
+需要用户在 ChatGPT 网页处理并把结果 ZIP 放回 `from_phone/`。
+
+## 2026-09-03：Gold 首次真实 2A→2B 贯通与 2C 拒收
+
+- Phase 2A 的 6 个 boundary 网页返回包一次全过（accepted 6 / rejected 0），
+  正式 CLEANED 组装完成；auto_advance 在真实 watcher 里无人值守推进到 2B 并再到 2C。
+- 首份 2C 返回包被拒，暴露两处 **validator 缺陷**（返回包本身合法），已修 + 回归测试：
+  1. `uncertain_items.content` 无条件要求非空，但 Phase 2A 会审计清空术语串入/模板
+     幻觉/复读副本（Gold 有 16 段）。引用这些 segment 的条目没有正文可引。
+  2. 不完整公式要求整条证据区间都进 `uncertain_items`，会把清晰语音标成存疑，
+     而 2D 会把每条 uncertainty 渲染成 `[!question]`，等于制造疑点。
+- **未放宽** outline derivations 的来源覆盖规则：该响应在 definitions/examples/
+  teacher_emphasis/exam_tips 上 100% 覆盖，只有 derivations 漏了 138 段中的 82 段，
+  属于返回包真实缺陷，按流程重跑网页任务。
+- 同时修复**重试回路不收敛**：`retry.md` 未并入任务身份，被拒后 batch_id 不变、
+  整包被幂等复用，用户拿到一模一样的 ZIP，模型收不到纠正反馈。现在 retry.md 的 sha
+  进入 task manifest 并随包下发，README 增加"必须先看"区块。
+- `prompts/concept_extraction.md` rule 5 写明 derivations 的 equations 来源必须覆盖
+  完整推理区间，且不得因此编造公式或把清晰语音塞进 uncertain。
+- 回归：**295 passed**；`pip check`、`git diff --check` 通过。
+
+---
+
+# HISTORICAL LOG
+
+> 以下均为历史快照，按时间倒序。保留原始验收数据，但其中的状态描述、
+> 「待办」与「下一步」已被上方 `CURRENT STATUS` 取代。
+
+## 总览（历史快照 · 2026-09-03 早些时候）
 
 | Phase | 内容 | 状态 |
 |---|---|---|
@@ -296,7 +345,10 @@ transcript 文件 mtime 未变 —— 确认 retry 不会重跑已成功的 ASR�
 
 ---
 
-## 待办
+## 待办（历史快照 · 2026-08-31，已全部完成，勿当成当前任务）
+
+> ⚠️ Historical Snapshot。下列 Phase 1 阻塞项在 2026-09-01/02 的真实课堂验收中
+> 已经全部完成（3/3 PASS）。保留原文仅为记录当时的验收口径。
 
 ### 阻塞项：等待当前真实课堂录音结束并完成抽检
 
@@ -372,8 +424,11 @@ python -m lecture_ai doctor        # 看「模型文件」这一项是否变成 
 
 ---
 
-## 下一步
+## 下一步（历史快照 · 2026-08-31，已完成，勿当成当前任务）
 
-1. 当前真实课堂录音结束并封口 → 自动完成 T8.3 / T8.4 验收
-2. 连续 3 次真实课堂使用无需人工干预
-3. 以上通过后，进入 **Phase 2（AI 课堂笔记）**
+> ⚠️ Historical Snapshot。下列三步在 2026-09-01/02 全部完成，Phase 2 已经开工。
+> 当前真实下一步见本文件顶部 `CURRENT STATUS`。
+
+1. ~~当前真实课堂录音结束并封口 → 自动完成 T8.3 / T8.4 验收~~ ✅
+2. ~~连续 3 次真实课堂使用无需人工干预~~ ✅ 3/3
+3. ~~以上通过后，进入 **Phase 2（AI 课堂笔记）**~~ ✅ 已进入

@@ -1,7 +1,7 @@
 # Phase 1.5 / Phase 2 TODO
 
-> 当前边界：Phase 1.5 已完成；Phase 2A 工程实现与 GPT 网页 Canary 已通过；
-> Phase 2B/2C/2D 工程均已实现，但等待 Gold 上游产物与逐阶段真实验收。
+> 当前边界：Phase 1.5 完成；**Phase 2A / 2B 已在 Gold Session 真实跑通并通过 QA**；
+> Phase 2C 等待网页返回（首份返回包已被严格校验拒收并按流程重跑）；Phase 2D 尚未运行。
 
 ## Phase 1.5 Selective Transcript Repair
 
@@ -23,7 +23,7 @@
 金样本：19 个异常 segments 合并为 16 个 repair windows；16 accepted / 0 rejected；
 可疑时长 582.86s → 0s；最大压缩率 29.7333 → 1.7419；额外 ASR 715.87s。
 
-## Phase 2A Transcript Cleaning
+## Phase 2A Transcript Cleaning — GOLD PASS
 
 - [x] REPAIRED 优先、RAW fallback 与 source layer/SHA provenance
 - [x] 8 分钟核心块 + 前后 30 秒 overlap（配置限制 5–10 分钟）
@@ -42,13 +42,15 @@
 - [x] 显式照片/图像/板书引用确定性标注，避免模型漏填 `visual_references`
 - [x] 网页 prompt 更新时旧 response/cache/CLEANED 可恢复封存
 - [x] 人工回填并验收 Gold Session chunk 02/05/09 三段 Canary（全部 PASS）
-- [ ] Canary PASS 后对 Gold Session 真实运行 12 个 chunks + 条件边界协调
-- [ ] 按 RAW/REPAIRED/CLEANED 抽查 10 个指定类型窗口
+- [x] Canary PASS 后对 Gold Session 真实运行 12 个 chunks + 条件边界协调
+- [x] 按 RAW/REPAIRED/CLEANED 抽查 10 个指定类型窗口
 
-当前停止点：三段 Canary 全部 PASS。下一步对 Gold Session 运行 12 个真实 GPT 网页清洗块
-及条件式边界协调；禁止用 FakeLLM 生成 Gold Session 的 `transcript_clean.json`。
+当前状态：**Phase 2A PASS**。Gold 正式 `transcript_clean.json/.md` 已生成：
+1447/1447 来源 segment 全覆盖、拓扑 0 violation、时间轴与 REPAIRED 一致；
+12 chunks + 11 boundaries（5 deterministic / 6 网页）全部通过严格校验，
+全程未使用 FakeLLM，未回退 RAW。
 
-## Phase 2B Lecture Structure Detection — ENGINEERING COMPLETE
+## Phase 2B Lecture Structure Detection — GOLD PASS
 
 未来输入：CLEANED。未来输出：`analysis/outline.json`。
 
@@ -58,7 +60,7 @@
 - [x] FakeLLM schema、越界时间、未知 source id、章节覆盖率与丢失推导测试
 - [x] CLEANED 硬输入门、SHA/prompt/schema fingerprint、缓存与 source-change invalidation
 - [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
-- [ ] Gold Session 人工检查章节边界
+- [x] Gold Session 人工检查章节边界
 
 ## Phase 2C Structured Knowledge Extraction — ENGINEERING COMPLETE
 
