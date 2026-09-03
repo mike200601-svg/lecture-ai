@@ -178,6 +178,8 @@ class CleanWebBatchService:
             ensure_dir(target_dir)
             for name in ("prompt.md", "schema.json", "request.json"):
                 shutil.copy2(source_dir / name, target_dir / name)
+            if task.get("retry_file"):
+                shutil.copy2(source_dir / "retry.md", target_dir / "retry.md")
 
         manifest = {
             **immutable,
@@ -448,6 +450,11 @@ class CleanWebBatchService:
         exchange_dir = Path(str(waiting["prompt"])).parent
         request_path = exchange_dir / "request.json"
         request = json.loads(request_path.read_text(encoding="utf-8"))
+        # 被拒后 retry.md 记录了具体校验错误。把它并入任务身份，否则 batch_id 不变、
+        # 整包会被幂等复用，用户拿到的仍是一模一样的 ZIP，模型收不到任何纠正反馈，
+        # 重试回路无法收敛。
+        retry_path = exchange_dir / "retry.md"
+        retry_sha = sha256_file(retry_path) if retry_path.is_file() else None
         pipeline_name = str(request.get("pipeline") or waiting.get("pipeline") or "clean")
         task_id = (
             exchange_dir.name if pipeline_name == "clean"
@@ -472,6 +479,8 @@ class CleanWebBatchService:
             "schema_file": f"tasks/{task_id}/schema.json",
             "request_file": f"tasks/{task_id}/request.json",
             "response_file": f"responses/{task_id}.json",
+            "retry_sha256": retry_sha,
+            "retry_file": f"tasks/{task_id}/retry.md" if retry_sha else None,
         }
 
     @staticmethod
@@ -614,7 +623,23 @@ def _render_readme(manifest: dict[str, Any]) -> str:
         f"- `{task['task_id']}` → `{task['response_file']}`"
         for task in manifest["tasks"]
     )
+    retry_tasks = [task for task in manifest["tasks"] if task.get("retry_file")]
+    retry_block = ""
+    if retry_tasks:
+        retry_lines = "\n".join(
+            f"- `{task['task_id']}`：先读 `{task['retry_file']}`"
+            for task in retry_tasks
+        )
+        retry_block = f"""
+## 本包含被拒任务，必须先看
+
+下列任务上一轮未通过严格校验，同目录 `retry.md` 写明了具体校验错误。
+请先读它，针对性修正后再输出，不要原样重交上一轮的结果：
+
+{retry_lines}
+"""
     return f"""# ChatGPT 网页批量课堂处理作业
+{retry_block}
 
 请完整处理本压缩包中的 {len(manifest['tasks'])} 个独立任务。
 

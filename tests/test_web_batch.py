@@ -252,3 +252,62 @@ def test_phase2_auto_advance_builds_each_next_phone_package(config, db, tmp_path
     )
     assert finished.status == "ready_for_phase2d_qa"
     assert (session_dir / "note" / "lecture_audio_draft.md").is_file()
+
+
+def test_rejected_task_rebuilds_package_carrying_retry_reason(config, db, tmp_path):
+    """被拒任务必须换一个新包，并把校验错误一起送到手机。
+
+    真实 Gold 回归：旧实现里 batch_id 只由任务身份决定，被拒后 tasks 没变，整包被
+    幂等复用 —— 用户拿到的仍是一模一样的 ZIP，模型收不到任何纠正反馈，重试回路
+    不收敛。retry.md 现在并入任务身份并随包下发。
+    """
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    service = CleanWebBatchService(config, db)
+
+    prepared = service.prepare(meta.session_id)
+    first_zip = Path(prepared.package_zip)
+    first_manifest = json.loads(
+        (Path(prepared.package_dir) / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert all(task["retry_sha256"] is None for task in first_manifest["tasks"])
+    assert "retry" not in (Path(prepared.package_dir) / "README.md").read_text(
+        encoding="utf-8"
+    )
+
+    returned = _return_directory(
+        Path(prepared.package_dir), tmp_path / "returned", invalid={"chunk_001"}
+    )
+    outcome = service.receive(meta.session_id, returned)
+
+    assert outcome.task_ids == ["chunk_001"]
+    retry_source = session_dir / "analysis" / "clean_web" / "chunk_001" / "retry.md"
+    assert retry_source.is_file()
+
+    # 换了新包，不是原样复用
+    retry_zip = Path(outcome.package_zip)
+    assert retry_zip != first_zip
+
+    manifest = json.loads(
+        (Path(outcome.package_dir) / "manifest.json").read_text(encoding="utf-8")
+    )
+    task = manifest["tasks"][0]
+    assert task["retry_sha256"] is not None
+    assert task["retry_file"] == "tasks/chunk_001/retry.md"
+
+    with zipfile.ZipFile(retry_zip) as archive:
+        names = set(archive.namelist())
+        packed = archive.read("tasks/chunk_001/retry.md").decode("utf-8")
+        readme = archive.read("README.md").decode("utf-8")
+    assert "tasks/chunk_001/retry.md" in names
+    assert packed == retry_source.read_text(encoding="utf-8")
+    assert "上一轮未通过严格校验" in readme
+    assert "tasks/chunk_001/retry.md" in readme
+
+    # 重试包仍能正常回收
+    fixed = _return_directory(Path(outcome.package_dir), tmp_path / "fixed")
+    final = service.receive(meta.session_id, fixed)
+    assert final.status == "ready_for_phase2a_qa"
+    assert final.accepted == 1 and final.rejected == 0

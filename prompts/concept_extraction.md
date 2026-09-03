@@ -16,6 +16,10 @@
    `status` 必须是 `incomplete`/`uncertain`，并在 `uncertain_items` 中保留问题；禁止猜公式。
 5. outline 中已有的 definitions、derivations、examples、teacher_emphasis、exam_tips 必须在
    对应知识类别或 `uncertain_items` 中有来源覆盖，不得为了简洁丢失。
+   其中 `derivations` 最容易漏：一条推导常跨十几到几十个 segment，而公式往往只在其中
+   两三段被念出来。对应 `equations` 的 `source_segment_ids` 必须覆盖老师**实际展开该
+   公式的完整推理区间**，而不是只引用公式被念出来的那几段。这是如实标注证据范围，
+   不是补写内容：不要因此编造公式，也不要把清晰语音塞进 `uncertain_items` 凑覆盖。
 6. CLEANED 中每个 uncertainty 必须进入 `uncertain_items`；每个 visual reference 必须进入
    `visual_references`。视觉项此阶段一律未解决，留给 Phase 3。
 7. `visual_references.timestamp` 等于首个来源 segment 的 start；context 只能忠实摘述相关话语。
