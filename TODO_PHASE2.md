@@ -1,7 +1,7 @@
 # Phase 1.5 / Phase 2 TODO
 
 > 当前边界：Phase 1.5 已完成；Phase 2A 工程实现与 GPT 网页 Canary 已通过；
-> Phase 2B/2C 工程已实现但等待 Gold 上游产物与真实验收；Phase 2D 只设计。
+> Phase 2B/2C/2D 工程均已实现，但等待 Gold 上游产物与逐阶段真实验收。
 
 ## Phase 1.5 Selective Transcript Repair
 
@@ -74,18 +74,21 @@
 - [x] FakeLLM 的 provenance、虚构公式、视觉引用路由测试
 - [ ] Gold Session 人工检查知识证据与未决视觉队列
 
-## Phase 2D Audio-only Lecture Draft — NOT IMPLEMENTED
+## Phase 2D Audio-only Lecture Draft — ENGINEERING COMPLETE
 
 未来输入：outline + knowledge。未来输出：`note/lecture_audio_draft.md`。
 
-- [ ] 定稿 `prompts/lecture_note.md`，明确 audio-only / not final
-- [ ] 定义 `AudioDraftPipeline` 接口和带 provenance 的 note block schema
-- [ ] 待板书内容用 `[!question]`，不得伪装成已解决
-- [ ] 快照、引用覆盖率、信息保留与禁止 Obsidian 写入测试
+- [x] 定稿 `prompts/lecture_note.md`，明确 audio-only / not final
+- [x] 定义 `AudioDraftPipeline` 接口和带 provenance 的 note block schema
+- [x] knowledge item 必须逐 topic 恰好编排一次，禁止丢失、重复与跨 topic
+- [x] 待板书、听辨疑点和残缺公式用 `[!question]`，不得伪装成已解决
+- [x] 由严格 JSON 确定性渲染 Markdown，禁止自由 Markdown、WikiLink 与 Vault 写入
+- [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
+- [x] 快照、引用覆盖率、信息保留与禁止 Obsidian 写入测试
+- [ ] Gold Session 人工检查草稿忠实度与所有 question callout
 
 ## 本轮明确不做
 
-- Phase 2D 代码
 - Phase 3 板书融合
 - VaultWriter、WikiLinks、Concept Notes、Course Index、知识图谱
 - 音频强降噪、新 DSP pipeline、外置麦克风方案

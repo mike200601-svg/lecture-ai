@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from lecture_ai.cleaning.pipeline import CleanPipeline
+from lecture_ai.audio_draft.pipeline import AudioDraftPipeline
 from lecture_ai.config import Config
 from lecture_ai.database import Database
 from lecture_ai.errors import LLMError
@@ -115,6 +116,24 @@ class CleanWebBatchService:
         waiting = [item for item in outcome.tasks if item.get("waiting")]
         if not waiting:
             raise LLMError("知识抽取仍为 partial，但没有可打包的网页任务")
+        return self._package_waiting(session_id, waiting)
+
+    def prepare_audio_draft(self, session_id: str) -> WebBatchOutcome:
+        """续跑 Phase 2D，并把草稿编排任务送入同一手机交换区。"""
+        outcome = AudioDraftPipeline(self.config, self.db).run(session_id)
+        if not outcome.partial:
+            result = WebBatchOutcome(
+                session_id=session_id,
+                status="ready_for_phase2d_qa",
+                message="audio-only 课堂草稿已生成，等待 Phase 2D QA",
+                output_json=outcome.output_json,
+                output_md=outcome.output_md,
+            )
+            self._write_state(result)
+            return result
+        waiting = [item for item in outcome.tasks if item.get("waiting")]
+        if not waiting:
+            raise LLMError("课堂草稿仍为 partial，但没有可打包的网页任务")
         return self._package_waiting(session_id, waiting)
 
     def _package_waiting(
@@ -237,6 +256,8 @@ class CleanWebBatchService:
             outcome = StructurePipeline(self.config, self.db).run(session_id)
         elif pipeline_name == "knowledge":
             outcome = KnowledgePipeline(self.config, self.db).run(session_id)
+        elif pipeline_name == "audio_draft":
+            outcome = AudioDraftPipeline(self.config, self.db).run(session_id)
         else:
             raise LLMError(f"返回包包含未知 pipeline：{pipeline_name}")
         accepted = sum(
@@ -251,11 +272,13 @@ class CleanWebBatchService:
                 "clean": "ready_for_phase2a_qa",
                 "structure": "ready_for_phase2b_qa",
                 "knowledge": "ready_for_phase2c_qa",
+                "audio_draft": "ready_for_phase2d_qa",
             }[pipeline_name]
             message = {
                 "clean": "返回包全部处理完成；正式 CLEANED 已组装，等待 Phase 2A QA",
                 "structure": "返回包全部处理完成；课堂结构已生成，等待 Phase 2B QA",
                 "knowledge": "返回包全部处理完成；知识与视觉疑点队列已生成，等待 Phase 2C QA",
+                "audio_draft": "返回包全部处理完成；audio-only 草稿已生成，等待 Phase 2D QA",
             }[pipeline_name]
             result = WebBatchOutcome(
                 session_id=session_id,
@@ -273,6 +296,7 @@ class CleanWebBatchService:
             "clean": self.prepare,
             "structure": self.prepare_structure,
             "knowledge": self.prepare_knowledge,
+            "audio_draft": self.prepare_audio_draft,
         }[pipeline_name](session_id)
         followup.accepted = accepted
         followup.rejected = rejected
@@ -315,8 +339,10 @@ class CleanWebBatchService:
                         maintained = self.prepare(session_id)
                     elif not (session_dir / "analysis" / "outline.json").is_file():
                         maintained = self.prepare_structure(session_id)
-                    else:
+                    elif not (session_dir / "analysis" / "knowledge.json").is_file():
                         maintained = self.prepare_knowledge(session_id)
+                    else:
+                        maintained = self.prepare_audio_draft(session_id)
                     if self._state_signature(previous) != self._state_signature(
                         maintained.__dict__
                     ):
@@ -338,7 +364,10 @@ class CleanWebBatchService:
             extracting = (analysis / "knowledge_web").is_dir() and not (
                 analysis / "knowledge.json"
             ).is_file()
-            if cleaning or structuring or extracting:
+            drafting = (analysis / "audio_draft_web").is_dir() and not (
+                analysis / "audio_draft.json"
+            ).is_file()
+            if cleaning or structuring or extracting or drafting:
                 active.append(session_id)
         return active
 
@@ -440,6 +469,7 @@ class CleanWebBatchService:
             "clean": "clean_web",
             "structure": "structure_web",
             "knowledge": "knowledge_web",
+            "audio_draft": "audio_draft_web",
         }.get(pipeline_name)
         if folder is None:
             raise LLMError(f"未知 pipeline：{pipeline_name}")
@@ -454,6 +484,8 @@ class CleanWebBatchService:
             name = "structure_cache.json"
         elif pipeline_name == "knowledge":
             name = "knowledge_cache.json"
+        elif pipeline_name == "audio_draft":
+            name = "audio_draft_cache.json"
         elif task["stage"] == "chunk":
             name = f"chunk_{int(index):03d}.json"
         else:
@@ -462,7 +494,7 @@ class CleanWebBatchService:
         analysis = self.sessions.session_dir(session_id) / "analysis"
         return (
             analysis / name
-            if pipeline_name in {"structure", "knowledge"}
+            if pipeline_name in {"structure", "knowledge", "audio_draft"}
             else analysis / "clean_cache" / name
         )
 

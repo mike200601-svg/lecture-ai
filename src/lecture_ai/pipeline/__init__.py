@@ -7,6 +7,7 @@ from lecture_ai.repair.pipeline import RepairPipeline
 from lecture_ai.cleaning.pipeline import CleanPipeline
 from lecture_ai.structure.pipeline import StructurePipeline
 from lecture_ai.knowledge.pipeline import KnowledgePipeline
+from lecture_ai.audio_draft.pipeline import AudioDraftPipeline
 
 __all__ = [
     "AudioProbeReport",
@@ -18,4 +19,5 @@ __all__ = [
     "CleanPipeline",
     "StructurePipeline",
     "KnowledgePipeline",
+    "AudioDraftPipeline",
 ]

@@ -18,7 +18,7 @@ RAW -> REPAIRED -> CLEANED -> STRUCTURED -> NOTE
 | CLEANED | `analysis/transcript_clean.{json,md}` | 忠实纠错、断句、标点与不确定性标记 | Phase 2A 实现 |
 | STRUCTURED | `analysis/outline.json` | 课堂结构与时间范围 | Phase 2B 工程已实现 |
 | KNOWLEDGE | `analysis/knowledge.json`、`analysis/unresolved_visual.json` | 知识项与待板书解析引用 | Phase 2C 工程已实现 |
-| NOTE | `note/lecture_audio_draft.md` | 仅基于音频的课堂草稿 | Phase 2D，未实现 |
+| NOTE | `analysis/audio_draft.json`、`note/lecture_audio_draft.md` | 仅基于音频的课堂草稿 | Phase 2D 工程已实现 |
 
 任何下游步骤都不得回写上游文件。
 Phase 1.5 每次执行前后都校验 RAW JSON 与 Markdown 的 SHA-256；发生变化立即失败。
@@ -185,13 +185,20 @@ source id 的知识、模型凭空补出的公式、outline 要素丢失和未�
 
 ### Phase 2D：Audio-only Lecture Draft
 
-输入 `outline.json` + `knowledge.json`，使用 `prompts/lecture_note.md`，输出
+输入正式 `outline.json` + `knowledge.json` + `unresolved_visual.json`，使用
+`prompts/lecture_note.md`，输出 `analysis/audio_draft.json` 与
 `note/lecture_audio_draft.md`。它明确是 audio draft，不是最终笔记；板书、教材和课件尚未融合。
-计划章节：本节框架、核心概念、推导、课堂例子、老师强调、易错点、待板书补充、本节小结。
-每段保留 source ids 或时间链接。
 
-计划接口：`AudioDraftPipeline.run(session_id) -> AudioLectureDraft`。
-测试计划：快照测试 note 结构；检查所有正文块有 provenance；视觉未决项必须呈现为
-`[!question]`，不得伪装成已解决；禁止生成 WikiLinks、Concept Notes 或写入 Obsidian Vault。
+实现接口：`AudioDraftPipeline.run(session_id) -> AudioDraftOutcome`。模型只返回严格 JSON 编排：
+sections 必须按顺序一一覆盖 outline topics，每个 knowledge item id 必须且只能进入所属 topic
+一次，section provenance 必须覆盖其中所有知识项来源。模型不得自由生成 Markdown；本地渲染器
+确定性写入本节框架、核心概念、公式、例题、强调、易错点、未决项与小结。
 
-Phase 2D 仍只有接口与测试计划，尚未实现。
+视觉未决项、听辨疑点与 incomplete/uncertain 公式必须呈现为 `[!question]`，不得伪装成已解决。
+frontmatter 固定 `source_layer: AUDIO_ONLY`、`final: false`；禁止 WikiLink、Concept Notes、
+课程索引或写入 Obsidian Vault。输入 SHA、prompt/schema、provider/model 进入 fingerprint，
+Markdown SHA 回写机器审计 JSON；任一上游变化只使草稿缓存失效，不回写上游。
+
+`chatgpt_web` 使用 `analysis/audio_draft_web/draft/` 与统一手机 ZIP 协议；坏响应封存后生成
+返工包。FakeLLM 与端到端测试覆盖 topic/item 丢失、重复、跨 topic、provenance 不全、WikiLink
+偷渡、未决 callout、缓存复用和手机返回包自动续跑。

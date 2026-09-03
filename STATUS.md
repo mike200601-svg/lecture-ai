@@ -12,7 +12,7 @@
 | Phase 2A | 忠实 Transcript Cleaning | 🟡 三片 Canary PASS；Gold chunk 已齐，边界网页核验进行中 |
 | Phase 2B | 课堂结构识别 | 🟡 工程完成；等待 Gold CLEANED 后真实运行与验收 |
 | Phase 2C | 知识抽取与视觉未决队列 | 🟡 工程完成；等待 Gold outline 后真实运行与验收 |
-| Phase 2D | audio-only draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
+| Phase 2D | audio-only draft | 🟡 工程完成；等待 Gold knowledge 后真实运行与验收 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
 | Phase 5 | 课程知识库 | ⬜ 未开始 |
@@ -42,6 +42,20 @@
   `analysis/unresolved_visual.json`，保留给 Phase 3，不把猜测伪装成事实。
 - `knowledge` CLI、缓存/输入变更失效、网页坏响应隔离和统一手机 ZIP 自动收发均已接通；
   产物通过后停在 `ready_for_phase2c_qa`，不越过人工门。
+
+## 2026-09-03：Phase 2D 工程实现
+
+- 定稿 `prompts/lecture_note.md`，新增 `AudioDraftPipeline`、严格编排 schema、确定性 Markdown
+  renderer；输出 `analysis/audio_draft.json` 与 `note/lecture_audio_draft.md`。
+- 只接受正式且 SHA 一致的 STRUCTURED、KNOWLEDGE、UNRESOLVED_VISUAL；任一上游缺失、过期、
+  篡改或视觉队列假装 resolved 都会硬失败。
+- sections 必须按原顺序一一覆盖 topics；每个 knowledge item 必须恰好编排一次且不得跨 topic，
+  section provenance 必须覆盖其知识项来源。
+- 视觉引用、听辨疑点与残缺公式确定性渲染为 `[!question]`；草稿固定 `AUDIO_ONLY`、
+  `final: false`，禁止 WikiLink、概念页、课程索引和 Obsidian Vault 写入。
+- `draft` CLI 与统一手机 ZIP/watcher 已接通，返回包通过后停在 `ready_for_phase2d_qa`。
+- 当前完整回归：**291 passed**；Gold 仍在等待 6 个 Phase 2A boundary 网页结果，没有越级生成
+  outline、knowledge 或 audio draft。
 
 ---
 

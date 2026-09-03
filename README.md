@@ -3,15 +3,15 @@
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
 **当前进度：Phase 1/1.5 已完成；Phase 2A Canary 已通过且 Gold 全量网页核验进行中；
-Phase 2B/2C 工程已完成，等待正式上游产物后做真实 QA。**
+Phase 2B/2C/2D 工程已完成，等待正式上游产物后逐阶段真实 QA。**
 
 ```text
 荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
                                                → 分块 LLM CLEANED
-                                               → STRUCTURED → KNOWLEDGE
+                                               → STRUCTURED → KNOWLEDGE → AUDIO_DRAFT
 ```
 
-Phase 2D 仅完成设计，Phase 3 与 Obsidian 集成尚未开始。Phase 2 数据分层与边界见
+Phase 3 与 Obsidian 集成尚未开始。Phase 2 数据分层与边界见
 [ARCHITECTURE_PHASE2.md](ARCHITECTURE_PHASE2.md)，任务见
 [TODO_PHASE2.md](TODO_PHASE2.md)，进度见 [STATUS.md](STATUS.md)。
 
@@ -86,6 +86,8 @@ python -m lecture_ai structure <session_id>          # 只接受正式 CLEANED
 python -m lecture_ai structure <session_id> --dry-run
 python -m lecture_ai knowledge <session_id>          # 只接受正式 CLEANED + outline
 python -m lecture_ai knowledge <session_id> --dry-run
+python -m lecture_ai draft <session_id>              # 只接受正式 outline + knowledge
+python -m lecture_ai draft <session_id> --dry-run
 ```
 
 产物在 `data/sessions/<session_id>/transcript/`：
@@ -114,7 +116,8 @@ prompt 更新时旧 response/cache/CLEANED 会改名封存，不会静默覆盖�
 可选 `openai` API provider 仍保留，只有使用它时才从 `.env` 读取 `OPENAI_API_KEY`。
 
 正式网页任务使用统一批处理交换，不再逐项人工搬运。只要某个 Session 已经生成
-`analysis/clean_web/`、`structure_web/` 或 `knowledge_web/` 任务，常驻 `watch` 会自动：
+`analysis/clean_web/`、`structure_web/`、`knowledge_web/` 或 `audio_draft_web/` 任务，
+常驻 `watch` 会自动：
 
 1. 把所有未完成 chunk/boundary 合并成带 manifest 和指纹的 ZIP；
 2. 将 ZIP 写入 `data/web_exchange/<session>/to_phone/`；
@@ -136,6 +139,13 @@ Phase 2C 的 `knowledge` 命令只读取同一 Session 的正式 CLEANED 与 `ou
 所有概念、公式、例题和强调都必须引用来源 segment，模型不得补全音频中残缺的公式。
 CLEANED 中的不确定项与视觉引用必须全部进入显式队列，留给人工或 Phase 3 解决。网页结果
 沿用同一手机 ZIP 协议，严格校验后自动落盘并停在 `ready_for_phase2c_qa`。
+
+Phase 2D 的 `draft` 命令只读取通过来源校验的 STRUCTURED、KNOWLEDGE 与视觉未决队列。
+GPT 网页只返回严格的章节编排 JSON，不直接自由输出 Markdown；本地渲染器确定性生成
+`note/lecture_audio_draft.md`，并把机器审计载荷保存为 `analysis/audio_draft.json`。每个
+knowledge item 必须恰好出现一次，所有视觉/听辨/残缺公式问题强制显示为 `[!question]`。
+草稿 frontmatter 明确标记 `source_layer: AUDIO_ONLY` 和 `final: false`，禁止 WikiLink、概念页、
+Vault 写入与教材化补全；网页任务同样走手机 ZIP，完成后停在 `ready_for_phase2d_qa`。
 
 ### 5. 手机自动同步（当前正式方案）
 

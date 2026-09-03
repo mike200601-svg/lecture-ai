@@ -11,6 +11,7 @@ import pytest
 
 from lecture_ai.cleaning.web_batch import CleanWebBatchService
 from lecture_ai.errors import LLMError
+from tests.test_audio_draft import _draft, _formal_draft_inputs
 from tests.test_cleaning import _faithful_responder, _make_session
 from tests.test_knowledge import _formal_inputs, _knowledge
 from tests.test_structure import _outline, _source, _write_cleaned
@@ -170,3 +171,25 @@ def test_knowledge_task_uses_same_phone_batch_and_auto_resumes(config, db, tmp_p
     assert outcome.accepted == 1 and outcome.rejected == 0
     assert (session_dir / "analysis" / "knowledge.json").exists()
     assert (session_dir / "analysis" / "unresolved_visual.json").exists()
+
+
+def test_audio_draft_uses_same_phone_batch_and_auto_resumes(config, db, tmp_path):
+    meta, session_dir, outline, knowledge, _ = _formal_draft_inputs(config, db)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    service = CleanWebBatchService(config, db)
+
+    prepared = service.prepare_audio_draft(meta.session_id)
+    returned = _return_directory(
+        Path(prepared.package_dir),
+        tmp_path / "returned_audio_draft",
+        responder=lambda _: _draft(outline, knowledge),
+    )
+    outcome = service.receive(meta.session_id, returned)
+
+    assert prepared.task_ids == ["audio_draft_draft"]
+    assert outcome.status == "ready_for_phase2d_qa"
+    assert outcome.accepted == 1 and outcome.rejected == 0
+    assert (session_dir / "analysis" / "audio_draft.json").exists()
+    assert (session_dir / "note" / "lecture_audio_draft.md").exists()
