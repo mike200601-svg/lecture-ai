@@ -1,7 +1,8 @@
 # Phase 1.5 / Phase 2 TODO
 
-> 当前边界：Phase 1.5 完成；**Phase 2A / 2B 已在 Gold Session 真实跑通并通过 QA**；
-> Phase 2C 等待网页返回（首份返回包已被严格校验拒收并按流程重跑）；Phase 2D 尚未运行。
+> 当前边界：**Phase 2A / 2B / 2C / 2D 已在 Gold Session 全链真实跑通并逐阶段通过 QA**。
+> 七个正式产物全部落盘。剩余唯一待办是用户人工比较 A/B 两份笔记。
+> Phase 3 未实现，Phase 4 未实现。
 
 ## Phase 1.5 Selective Transcript Repair
 
@@ -62,7 +63,7 @@
 - [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
 - [x] Gold Session 人工检查章节边界
 
-## Phase 2C Structured Knowledge Extraction — ENGINEERING COMPLETE
+## Phase 2C Structured Knowledge Extraction — GOLD PASS
 
 未来输入：CLEANED + outline。未来输出：`analysis/knowledge.json` 和
 `analysis/unresolved_visual.json`。
@@ -74,9 +75,9 @@
 - [x] CLEANED + outline 双输入 SHA/fingerprint 硬门与缓存失效
 - [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
 - [x] FakeLLM 的 provenance、虚构公式、视觉引用路由测试
-- [ ] Gold Session 人工检查知识证据与未决视觉队列
+- [x] Gold Session 人工检查知识证据与未决视觉队列
 
-## Phase 2D Audio-only Lecture Draft — ENGINEERING COMPLETE
+## Phase 2D Audio-only Lecture Draft — GOLD PASS
 
 未来输入：outline + knowledge。未来输出：`note/lecture_audio_draft.md`。
 
@@ -87,10 +88,27 @@
 - [x] 由严格 JSON 确定性渲染 Markdown，禁止自由 Markdown、WikiLink 与 Vault 写入
 - [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
 - [x] 快照、引用覆盖率、信息保留与禁止 Obsidian 写入测试
-- [ ] Gold Session 人工检查草稿忠实度与所有 question callout
+- [x] Gold Session 人工检查草稿忠实度与所有 question callout
 
 ## 本轮明确不做
 
 - Phase 3 板书融合
 - VaultWriter、WikiLinks、Concept Notes、Course Index、知识图谱
 - 音频强降噪、新 DSP pipeline、外置麦克风方案
+
+## Gold Session 全链结果（2026-09-03）
+
+Session `2026-09-01_unknown_001`，数字电子技术基础，01:34:42。
+
+| 阶段 | 正式产物 | 关键指标 |
+|---|---|---|
+| 2A | `analysis/transcript_clean.json` / `.md` | 1447/1447 覆盖、拓扑 0 violation、corrections 1123 |
+| 2B | `analysis/outline.json` | 17 topics、121 项子结构 0 越界 |
+| 2C | `analysis/knowledge.json`、`analysis/unresolved_visual.json` | 323 知识项、43 未决视觉 0 遗漏 |
+| 2D | `analysis/audio_draft.json`、`note/lecture_audio_draft.md` | 17 sections、92,850 字符、245 个 `[!question]` |
+
+真实网页任务 9 次（12 chunk 合 1 包 + 6 boundary + 2B + 2C×2 + 2D），
+其中 2C 第一次因 validator 缺陷被拒、第二次因 prompt 指纹过期被拒，第三次通过。
+全程无 FakeLLM、无伪造网页回复、无 fallback 上游。
+
+A/B 比较包：`data/sessions/2026-09-01_unknown_001/comparison/`（B 组待用户生成）。

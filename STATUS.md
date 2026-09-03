@@ -17,13 +17,29 @@
 - **Phase 2B：PASS**。正式 `outline.json` 已生成：17 topics、1447 segment 恰好覆盖一次、
   来源连续、时间规则 0 violation、121 项子结构 0 越界；章节边界逐个对照原文，
   全部落在老师自己的转场话上。
-- **Phase 2C：进行中**，等待手机网页返回。第一份返回包被严格校验拒收，
-  已按流程重跑（见下方"2026-09-03 首次真实 2C 拒收"）。
-- **Phase 2D：未运行**，上游 knowledge 尚未产出。
+- **Phase 2C：PASS**。正式 `knowledge.json` + `unresolved_visual.json` 已生成：
+  concepts 30、equations 8、examples 21、teacher_emphasis 12、exam_tips 2、
+  common_errors 6、uncertainties 201、unresolved visual 43。每项来源 ids 非空、
+  0 未知 segment、0 跨 topic；8 条公式全部有真实原声证据；CLEANED 的 32 个视觉
+  segment 100% 进入未决队列，无一项声称 resolved。CLEANED/outline SHA 双匹配。
+- **Phase 2D：PASS**。正式 `analysis/audio_draft.json` 与
+  `note/lecture_audio_draft.md`（92,850 字符 / 17 sections）已生成。
+  323 个知识项**恰好各编排一次**，0 重复、0 未知、0 跨 topic、0 遗漏；
+  section provenance 覆盖全部知识项来源；sections 按原顺序恰好覆盖全部 segment。
+  硬闸门：`source_layer: AUDIO_ONLY`、`final: false`、WikiLink 0 个、
+  未写 Obsidian Vault。245 个 `[!question]` = 201 听辨疑点 + 43 待板书
+  + 1 未核验公式，视觉项一律 `状态：unresolved`，不假装已解决。
 - **Phase 3 / 4 / 5 / 6：未开始**，本轮明确不实现。
 
-当前唯一阻塞：`data/web_exchange/2026-09-01_unknown_001/to_phone/` 下的 Phase 2C 任务包
-需要用户在 ChatGPT 网页处理并把结果 ZIP 放回 `from_phone/`。
+**Gold Session 2A→2D 全链已首次真实跑通**，七个正式产物全部落盘，
+每层来源 SHA 与上游 fingerprint 正确，全程无 FakeLLM、无伪造网页回复、无 fallback 上游。
+
+当前唯一待办：用户人工比较 A/B 两份笔记，判断这套流水线是否值得。
+比较包见 `data/sessions/2026-09-01_unknown_001/comparison/`
+（B 组需用户在 ChatGPT 网页跑一次 `B_prompt.md` 生成）。
+
+**Phase 3 未实现，Phase 4 未实现。** 按本轮约定，在用户看过第一份
+audio draft 之前不启动板书融合、Obsidian、WikiLink、课程索引或知识图谱。
 
 ## 2026-09-03：Gold 首次真实 2A→2B 贯通与 2C 拒收
 
