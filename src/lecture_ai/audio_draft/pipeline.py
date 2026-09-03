@@ -66,6 +66,15 @@ class AudioDraftPipeline:
         knowledge_path = analysis / KNOWLEDGE_JSON
         unresolved_path = analysis / UNRESOLVED_VISUAL_JSON
 
+        for path, label in (
+            (clean_path, "CLEANED 依赖"),
+            (outline_path, "STRUCTURED"),
+            (knowledge_path, "KNOWLEDGE"),
+            (unresolved_path, "UNRESOLVED_VISUAL"),
+        ):
+            if not path.is_file():
+                raise LLMError(f"Phase 2D 缺少正式 {label}：{path}")
+
         cleaned = KnowledgePipeline._read_cleaned(clean_path, session_id)
         segments = KnowledgePipeline._normalize_segments(cleaned["segments"])
         clean_sha = sha256_file(clean_path)
