@@ -58,6 +58,18 @@ courses:
         start: "09:45"
         end: "11:20"
 
+  computational_physics_b:
+    name: 计算物理B
+    teacher: ""
+    semester: 2026-秋
+    glossary: ""
+    obsidian_folder: University/计算物理B
+    schedule:
+      # 根据 2026-09-03 实际录音暂录；收到完整课表后统一校准。
+      - weekday: 4
+        start: "09:45"
+        end: "12:10"
+
   # 兜底课程：匹配不到任何课表时使用，不要删除
   unknown:
     name: 未归类

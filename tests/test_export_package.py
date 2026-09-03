@@ -56,6 +56,16 @@ def test_export_directory_layout_and_names_include_identity(config, db):
     assert all(prefix in path.name for path in (outcome.output_dir / "03_slides").iterdir())
 
 
+def test_export_preserves_course_name_case(config, db):
+    manager, meta = _create_session(config, db)
+    meta.course.name = "计算物理B"
+    manager.save(meta)
+
+    outcome = ExportPackageBuilder(config, db).build(meta.session_id)
+
+    assert outcome.output_dir.name == "2026-09-03_1400_计算物理B_001"
+
+
 def test_manifest_records_sources_hashes_and_suggested_note_name(config, db):
     manager, meta = _create_session(config, db)
     board = manager.session_dir(meta.session_id) / "images" / "b.png"

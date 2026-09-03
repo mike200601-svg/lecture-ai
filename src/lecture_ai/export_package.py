@@ -23,11 +23,11 @@ from lecture_ai.session import SessionManager
 from lecture_ai.session.models import SessionMeta
 from lecture_ai.utils.hashing import sha256_file
 from lecture_ai.utils.paths import atomic_write_text, rel_to
-from lecture_ai.utils.slug import slugify
 from lecture_ai.utils.timefmt import now_local, parse_iso, to_iso
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff"}
 SLIDE_EXTENSIONS = {".pdf", ".ppt", ".pptx", ".odp", ".key", ".jpg", ".jpeg", ".png", ".webp"}
+WINDOWS_UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 @dataclass(frozen=True)
@@ -177,10 +177,21 @@ class ExportPackageBuilder:
         start = parse_iso(meta.start_time)
         date = meta.date or (start.strftime("%Y-%m-%d") if start else "unknown-date")
         time = start.strftime("%H%M") if start else self._time_from_session_id(meta.session_id)
-        course = slugify(meta.course.name or meta.course.key or "unknown-course", max_len=60)
+        course = self._safe_course_label(
+            meta.course.name or meta.course.key or "unknown-course"
+        )
         seq_match = re.search(r"_(\d{3})$", meta.session_id)
         sequence = seq_match.group(1) if seq_match else "001"
         return f"{date}_{time}_{course}_{sequence}"
+
+    @staticmethod
+    def _safe_course_label(value: str, max_len: int = 60) -> str:
+        """生成文件名安全的课程显示名，同时保留 ``计算物理B`` 里的大小写。"""
+        label = WINDOWS_UNSAFE_FILENAME.sub("-", value.strip())
+        label = re.sub(r"[\s_]+", "-", label)
+        label = re.sub(r"-{2,}", "-", label).strip("-.")
+        label = label[:max_len].rstrip("-.")
+        return label or "unknown-course"
 
     @staticmethod
     def _time_from_session_id(session_id: str) -> str:
