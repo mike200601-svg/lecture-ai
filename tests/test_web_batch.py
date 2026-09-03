@@ -12,6 +12,7 @@ import pytest
 from lecture_ai.cleaning.web_batch import CleanWebBatchService
 from lecture_ai.errors import LLMError
 from tests.test_cleaning import _faithful_responder, _make_session
+from tests.test_knowledge import _formal_inputs, _knowledge
 from tests.test_structure import _outline, _source, _write_cleaned
 
 
@@ -147,3 +148,25 @@ def test_structure_task_uses_same_phone_batch_and_auto_resumes(config, db, tmp_p
     assert outcome.status == "ready_for_phase2b_qa"
     assert outcome.accepted == 1 and outcome.rejected == 0
     assert (session_dir / "analysis" / "outline.json").exists()
+
+
+def test_knowledge_task_uses_same_phone_batch_and_auto_resumes(config, db, tmp_path):
+    meta, session_dir, source, outline = _formal_inputs(config, db)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    service = CleanWebBatchService(config, db)
+
+    prepared = service.prepare_knowledge(meta.session_id)
+    returned = _return_directory(
+        Path(prepared.package_dir),
+        tmp_path / "returned_knowledge",
+        responder=lambda _: _knowledge(),
+    )
+    outcome = service.receive(meta.session_id, returned)
+
+    assert prepared.task_ids == ["knowledge_extract"]
+    assert outcome.status == "ready_for_phase2c_qa"
+    assert outcome.accepted == 1 and outcome.rejected == 0
+    assert (session_dir / "analysis" / "knowledge.json").exists()
+    assert (session_dir / "analysis" / "unresolved_visual.json").exists()

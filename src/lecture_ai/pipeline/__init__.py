@@ -6,6 +6,7 @@ from lecture_ai.pipeline.watcher import Watcher
 from lecture_ai.repair.pipeline import RepairPipeline
 from lecture_ai.cleaning.pipeline import CleanPipeline
 from lecture_ai.structure.pipeline import StructurePipeline
+from lecture_ai.knowledge.pipeline import KnowledgePipeline
 
 __all__ = [
     "AudioProbeReport",
@@ -16,4 +17,5 @@ __all__ = [
     "RepairPipeline",
     "CleanPipeline",
     "StructurePipeline",
+    "KnowledgePipeline",
 ]

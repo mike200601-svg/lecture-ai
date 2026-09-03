@@ -20,6 +20,7 @@ from lecture_ai.cleaning.pipeline import CleanPipeline
 from lecture_ai.config import Config
 from lecture_ai.database import Database
 from lecture_ai.errors import LLMError
+from lecture_ai.knowledge.pipeline import KnowledgePipeline
 from lecture_ai.logging_setup import get_logger
 from lecture_ai.session import SessionManager
 from lecture_ai.structure.pipeline import StructurePipeline
@@ -97,6 +98,23 @@ class CleanWebBatchService:
         waiting = [item for item in outcome.tasks if item.get("waiting")]
         if not waiting:
             raise LLMError("结构识别仍为 partial，但没有可打包的网页任务")
+        return self._package_waiting(session_id, waiting)
+
+    def prepare_knowledge(self, session_id: str) -> WebBatchOutcome:
+        """续跑 Phase 2C，并把待返回的知识抽取任务送入同一手机交换区。"""
+        outcome = KnowledgePipeline(self.config, self.db).run(session_id)
+        if not outcome.partial:
+            result = WebBatchOutcome(
+                session_id=session_id,
+                status="ready_for_phase2c_qa",
+                message="可追溯知识与视觉疑点队列已生成，等待 Phase 2C QA",
+                output_json=outcome.output_json,
+            )
+            self._write_state(result)
+            return result
+        waiting = [item for item in outcome.tasks if item.get("waiting")]
+        if not waiting:
+            raise LLMError("知识抽取仍为 partial，但没有可打包的网页任务")
         return self._package_waiting(session_id, waiting)
 
     def _package_waiting(
@@ -217,6 +235,8 @@ class CleanWebBatchService:
             outcome = self.pipeline.run(session_id)
         elif pipeline_name == "structure":
             outcome = StructurePipeline(self.config, self.db).run(session_id)
+        elif pipeline_name == "knowledge":
+            outcome = KnowledgePipeline(self.config, self.db).run(session_id)
         else:
             raise LLMError(f"返回包包含未知 pipeline：{pipeline_name}")
         accepted = sum(
@@ -227,15 +247,16 @@ class CleanWebBatchService:
         rejected = max(0, staged - accepted)
 
         if not outcome.partial:
-            status = (
-                "ready_for_phase2a_qa" if pipeline_name == "clean"
-                else "ready_for_phase2b_qa"
-            )
-            message = (
-                "返回包全部处理完成；正式 CLEANED 已组装，等待 Phase 2A QA"
-                if pipeline_name == "clean"
-                else "返回包全部处理完成；课堂结构已生成，等待 Phase 2B QA"
-            )
+            status = {
+                "clean": "ready_for_phase2a_qa",
+                "structure": "ready_for_phase2b_qa",
+                "knowledge": "ready_for_phase2c_qa",
+            }[pipeline_name]
+            message = {
+                "clean": "返回包全部处理完成；正式 CLEANED 已组装，等待 Phase 2A QA",
+                "structure": "返回包全部处理完成；课堂结构已生成，等待 Phase 2B QA",
+                "knowledge": "返回包全部处理完成；知识与视觉疑点队列已生成，等待 Phase 2C QA",
+            }[pipeline_name]
             result = WebBatchOutcome(
                 session_id=session_id,
                 status=status,
@@ -248,11 +269,11 @@ class CleanWebBatchService:
             self._write_state(result)
             return result
 
-        followup = (
-            self.prepare(session_id)
-            if pipeline_name == "clean"
-            else self.prepare_structure(session_id)
-        )
+        followup = {
+            "clean": self.prepare,
+            "structure": self.prepare_structure,
+            "knowledge": self.prepare_knowledge,
+        }[pipeline_name](session_id)
         followup.accepted = accepted
         followup.rejected = rejected
         followup.message = (
@@ -292,8 +313,10 @@ class CleanWebBatchService:
                     session_dir = self.sessions.session_dir(session_id)
                     if not (session_dir / "analysis" / "transcript_clean.json").is_file():
                         maintained = self.prepare(session_id)
-                    else:
+                    elif not (session_dir / "analysis" / "outline.json").is_file():
                         maintained = self.prepare_structure(session_id)
+                    else:
+                        maintained = self.prepare_knowledge(session_id)
                     if self._state_signature(previous) != self._state_signature(
                         maintained.__dict__
                     ):
@@ -312,7 +335,10 @@ class CleanWebBatchService:
             structuring = (analysis / "structure_web").is_dir() and not (
                 analysis / "outline.json"
             ).is_file()
-            if cleaning or structuring:
+            extracting = (analysis / "knowledge_web").is_dir() and not (
+                analysis / "knowledge.json"
+            ).is_file()
+            if cleaning or structuring or extracting:
                 active.append(session_id)
         return active
 
@@ -410,7 +436,13 @@ class CleanWebBatchService:
 
     def _exchange_dir(self, session_id: str, task: dict[str, Any]) -> Path:
         pipeline_name = str(task.get("pipeline") or "clean")
-        folder = "clean_web" if pipeline_name == "clean" else "structure_web"
+        folder = {
+            "clean": "clean_web",
+            "structure": "structure_web",
+            "knowledge": "knowledge_web",
+        }.get(pipeline_name)
+        if folder is None:
+            raise LLMError(f"未知 pipeline：{pipeline_name}")
         return self.sessions.session_dir(session_id) / "analysis" / folder / str(
             task.get("exchange_name") or task["task_id"]
         )
@@ -420,13 +452,19 @@ class CleanWebBatchService:
         pipeline_name = str(task.get("pipeline") or "clean")
         if pipeline_name == "structure":
             name = "structure_cache.json"
+        elif pipeline_name == "knowledge":
+            name = "knowledge_cache.json"
         elif task["stage"] == "chunk":
             name = f"chunk_{int(index):03d}.json"
         else:
             left, right = (int(value) for value in str(index).split("-", 1))
             name = f"boundary_{left:03d}_{right:03d}.json"
         analysis = self.sessions.session_dir(session_id) / "analysis"
-        return analysis / name if pipeline_name == "structure" else analysis / "clean_cache" / name
+        return (
+            analysis / name
+            if pipeline_name in {"structure", "knowledge"}
+            else analysis / "clean_cache" / name
+        )
 
 
 class _PackageReader:

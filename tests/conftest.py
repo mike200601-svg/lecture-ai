@@ -113,6 +113,10 @@ def project_root(tmp_path: Path) -> Path:
     (root / "prompts" / "chapter_detection.md").write_text(
         structure_prompt.read_text(encoding="utf-8"), encoding="utf-8"
     )
+    knowledge_prompt = Path(__file__).resolve().parents[1] / "prompts" / "concept_extraction.md"
+    (root / "prompts" / "concept_extraction.md").write_text(
+        knowledge_prompt.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     (root / "pyproject.toml").write_text("[project]\nname='t'\n", encoding="utf-8")
     return root
 

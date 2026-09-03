@@ -1,7 +1,7 @@
 # Phase 1.5 / Phase 2 TODO
 
 > 当前边界：Phase 1.5 已完成；Phase 2A 工程实现与 GPT 网页 Canary 已通过；
-> Phase 2B 工程已实现但等待 Gold CLEANED 与真实验收；Phase 2C/D 只设计。
+> Phase 2B/2C 工程已实现但等待 Gold 上游产物与真实验收；Phase 2D 只设计。
 
 ## Phase 1.5 Selective Transcript Repair
 
@@ -60,16 +60,19 @@
 - [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
 - [ ] Gold Session 人工检查章节边界
 
-## Phase 2C Structured Knowledge Extraction — NOT IMPLEMENTED
+## Phase 2C Structured Knowledge Extraction — ENGINEERING COMPLETE
 
 未来输入：CLEANED + outline。未来输出：`analysis/knowledge.json` 和
 `analysis/unresolved_visual.json`。
 
-- [ ] 定稿 `prompts/concept_extraction.md`
-- [ ] 定义 `KnowledgePipeline` / knowledge / unresolved visual schemas
-- [ ] 所有知识项带 source ids；不完整公式进入 uncertain/unresolved，不得补写
-- [ ] visual reference 包含 timestamp/context/reference_type/confidence
-- [ ] FakeLLM 的 provenance、虚构公式、视觉引用路由测试
+- [x] 定稿 `prompts/concept_extraction.md`
+- [x] 定义 `KnowledgePipeline` / knowledge / unresolved visual schemas
+- [x] 所有知识项带 source ids；不完整公式进入 uncertain/unresolved，不得补写
+- [x] visual reference 包含 timestamp/context/reference_type/confidence
+- [x] CLEANED + outline 双输入 SHA/fingerprint 硬门与缓存失效
+- [x] GPT 网页任务接入手机双向整包交换、坏结果隔离与 watcher 自动续跑
+- [x] FakeLLM 的 provenance、虚构公式、视觉引用路由测试
+- [ ] Gold Session 人工检查知识证据与未决视觉队列
 
 ## Phase 2D Audio-only Lecture Draft — NOT IMPLEMENTED
 
@@ -82,7 +85,7 @@
 
 ## 本轮明确不做
 
-- Phase 2C / 2D 代码
+- Phase 2D 代码
 - Phase 3 板书融合
 - VaultWriter、WikiLinks、Concept Notes、Course Index、知识图谱
 - 音频强降噪、新 DSP pipeline、外置麦克风方案

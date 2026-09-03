@@ -234,6 +234,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     report("清洗 prompt", clean_prompt.exists(), str(clean_prompt))
     structure_prompt = config.paths.project_root / "prompts" / "chapter_detection.md"
     report("结构 prompt", structure_prompt.exists(), str(structure_prompt))
+    knowledge_prompt = config.paths.project_root / "prompts" / "concept_extraction.md"
+    report("知识抽取 prompt", knowledge_prompt.exists(), str(knowledge_prompt))
     if config.llm.provider == "chatgpt_web":
         report(
             "文本 LLM",
@@ -626,6 +628,37 @@ def cmd_structure(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_knowledge(args: argparse.Namespace) -> int:
+    """从正式 CLEANED + STRUCTURED 抽取可追溯知识。"""
+    from lecture_ai.knowledge import KnowledgePipeline
+
+    config = _bootstrap(args)
+    outcome = KnowledgePipeline(config).run(
+        args.session_id,
+        dry_run=args.dry_run,
+        force=args.force,
+    )
+    if outcome.dry_run:
+        out(f"DRY RUN · {outcome.session_id} · {outcome.message}")
+        return EXIT_OK
+    if outcome.partial:
+        out(f"✓ {outcome.session_id}  {outcome.message}")
+        for item in outcome.tasks:
+            out(f"  knowledge prompt  {item['prompt']}")
+            out(f"            response {item['response']}")
+        return EXIT_OK
+    marker = "复用" if outcome.reused else "完成"
+    out(
+        f"✓ {outcome.session_id}  知识抽取{marker}："
+        f"{outcome.source_segments} 个来源 segments（{outcome.elapsed_sec:.1f} 秒）"
+    )
+    if outcome.output_json:
+        out(f"  JSON    {outcome.output_json}")
+    if outcome.unresolved_visual_json:
+        out(f"  VISUAL  {outcome.unresolved_visual_json}")
+    return EXIT_OK
+
+
 def cmd_watch(args: argparse.Namespace) -> int:
     """长驻监听 incoming 目录。"""
     from lecture_ai.pipeline import Watcher
@@ -759,6 +792,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_structure.add_argument("--force", action="store_true", help="忽略现有结构产物与缓存")
     p_structure.set_defaults(func=cmd_structure)
+
+    p_knowledge = sub.add_parser(
+        "knowledge", help="从正式 CLEANED + STRUCTURED 抽取知识（Phase 2C）"
+    )
+    p_knowledge.add_argument("session_id")
+    p_knowledge.add_argument(
+        "--dry-run", action="store_true", help="只验证上游输入，不调用 LLM"
+    )
+    p_knowledge.add_argument("--force", action="store_true", help="忽略现有知识产物与缓存")
+    p_knowledge.set_defaults(func=cmd_knowledge)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,

@@ -2,15 +2,16 @@
 
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
-**当前进度：Phase 1 真实课堂链路已验收；Phase 1.5 选择性修复已完成；Phase 2A
-清洗基础设施与 GPT 网页版 Canary 已通过，等待 Gold Session 全量清洗。**
+**当前进度：Phase 1/1.5 已完成；Phase 2A Canary 已通过且 Gold 全量网页核验进行中；
+Phase 2B/2C 工程已完成，等待正式上游产物后做真实 QA。**
 
 ```text
 荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
                                                → 分块 LLM CLEANED
+                                               → STRUCTURED → KNOWLEDGE
 ```
 
-Phase 2B/C/D 仅完成设计，Phase 3 与 Obsidian 集成尚未开始。Phase 2 数据分层与边界见
+Phase 2D 仅完成设计，Phase 3 与 Obsidian 集成尚未开始。Phase 2 数据分层与边界见
 [ARCHITECTURE_PHASE2.md](ARCHITECTURE_PHASE2.md)，任务见
 [TODO_PHASE2.md](TODO_PHASE2.md)，进度见 [STATUS.md](STATUS.md)。
 
@@ -83,6 +84,8 @@ python -m lecture_ai clean <session_id> --dry-run
 python -m lecture_ai clean-canary <session_id> --chunks 2 5 9
 python -m lecture_ai structure <session_id>          # 只接受正式 CLEANED
 python -m lecture_ai structure <session_id> --dry-run
+python -m lecture_ai knowledge <session_id>          # 只接受正式 CLEANED + outline
+python -m lecture_ai knowledge <session_id> --dry-run
 ```
 
 产物在 `data/sessions/<session_id>/transcript/`：
@@ -110,15 +113,14 @@ prompt 更新时旧 response/cache/CLEANED 会改名封存，不会静默覆盖�
 不额外使用会阻止正常上下文纠错的 token 硬锁。
 可选 `openai` API provider 仍保留，只有使用它时才从 `.env` 读取 `OPENAI_API_KEY`。
 
-正式全量清洗使用批处理交换，不再逐 chunk 人工搬运。只要某个 Session 已经生成
-`analysis/clean_web/` 任务，常驻 `watch` 会自动：
+正式网页任务使用统一批处理交换，不再逐项人工搬运。只要某个 Session 已经生成
+`analysis/clean_web/`、`structure_web/` 或 `knowledge_web/` 任务，常驻 `watch` 会自动：
 
 1. 把所有未完成 chunk/boundary 合并成带 manifest 和指纹的 ZIP；
 2. 将 ZIP 写入 `data/web_exchange/<session>/to_phone/`；
 3. 监听 `data/web_exchange/<session>/from_phone/`；
 4. 对返回包逐项校验，合格项进正式 cache，不合格项封存并自动生成下一份返工包；
-5. 全部通过后自动组装 `transcript_clean.json/.md`，把状态置为
-   `ready_for_phase2a_qa`。Phase 2B 不会自动越级启动。
+5. 全部通过后自动组装当前阶段产物并停在对应人工 QA 门，不会自动越级启动下一阶段。
 
 ZIP 内的 `README.md` 是给 GPT 网页的完整任务说明。把整包上传给 GPT，下载它返回的 ZIP，
 原样放进 `from_phone/` 即可；不得修改或丢弃 `manifest.json`。共享目录中的 `state.json`
@@ -128,6 +130,12 @@ Phase 2B 的 `structure` 命令只读取正式 `analysis/transcript_clean.json`�
 不会回退 RAW/REPAIRED。输出为 `analysis/outline.json`：章节必须按顺序恰好覆盖全部 CLEANED
 segment；子主题、定义、推导、例题、强调、考试提示和过渡都带来源 id 与时间范围。网页
 结果同样进入上述手机整包通道，返回后由 watcher 自动校验并续跑。
+
+Phase 2C 的 `knowledge` 命令只读取同一 Session 的正式 CLEANED 与 `outline.json`，同时校验
+两层 SHA 和 provenance。输出 `analysis/knowledge.json` 与 `analysis/unresolved_visual.json`；
+所有概念、公式、例题和强调都必须引用来源 segment，模型不得补全音频中残缺的公式。
+CLEANED 中的不确定项与视觉引用必须全部进入显式队列，留给人工或 Phase 3 解决。网页结果
+沿用同一手机 ZIP 协议，严格校验后自动落盘并停在 `ready_for_phase2c_qa`。
 
 ### 5. 手机自动同步（当前正式方案）
 

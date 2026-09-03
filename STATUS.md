@@ -9,9 +9,10 @@
 | Phase 0 | 工程骨架 | ✅ 完成 |
 | Phase 1 | 音频自动转录 MVP | ✅ 连续真实课堂验收 3/3；含口音与轻声/杂音场景 |
 | Phase 1.5 | 可疑 ASR 区间选择性修复 | ✅ 真实课堂完成 |
-| Phase 2A | 忠实 Transcript Cleaning | 🟡 三片 GPT 网页 Canary PASS；Gold 全量清洗待运行 |
+| Phase 2A | 忠实 Transcript Cleaning | 🟡 三片 Canary PASS；Gold chunk 已齐，边界网页核验进行中 |
 | Phase 2B | 课堂结构识别 | 🟡 工程完成；等待 Gold CLEANED 后真实运行与验收 |
-| Phase 2C/D | 知识抽取、audio draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
+| Phase 2C | 知识抽取与视觉未决队列 | 🟡 工程完成；等待 Gold outline 后真实运行与验收 |
+| Phase 2D | audio-only draft | 📐 仅架构/接口/Prompt/测试计划，未实现 |
 | Phase 3 | 板书照片融合 | ⬜ 未开始（仅目录占位） |
 | Phase 4 | Obsidian 集成 | ⬜ 未开始（仅目录占位） |
 | Phase 5 | 课程知识库 | ⬜ 未开始 |
@@ -29,6 +30,18 @@
   cache hit/retry 和每项 `source_segment_ids`，不回写上游。
 - Phase 2B 网页任务复用手机双向批处理交换；watcher 能自动接收结构返回包并续跑。
 - 当前没有对 Gold 运行 FakeLLM，也没有在上游 CLEANED 缺失时生成正式 outline。
+
+## 2026-09-03：Phase 2C 工程实现
+
+- 定稿 `prompts/concept_extraction.md`，新增 `KnowledgePipeline` 与严格 knowledge schema。
+- 只接受同一 Session 的正式 CLEANED + STRUCTURED，并验证来源 SHA、fingerprint、segment
+  provenance 与 topic 包含关系；缺失上游时硬失败，不回退、不伪造。
+- 所有知识项必须带来源 ids；低于阈值的概念、未知/跨 topic 来源、无音频证据的公式、
+  outline 要素丢失会被拒绝。
+- CLEANED uncertainty、残缺公式与视觉引用必须进入显式未决队列；视觉项另外落盘到
+  `analysis/unresolved_visual.json`，保留给 Phase 3，不把猜测伪装成事实。
+- `knowledge` CLI、缓存/输入变更失效、网页坏响应隔离和统一手机 ZIP 自动收发均已接通；
+  产物通过后停在 `ready_for_phase2c_qa`，不越过人工门。
 
 ---
 

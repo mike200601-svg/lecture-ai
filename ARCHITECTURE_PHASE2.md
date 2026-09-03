@@ -17,7 +17,7 @@ RAW -> REPAIRED -> CLEANED -> STRUCTURED -> NOTE
 | REPAIRED | `transcript/transcript_repaired.{json,md}` | 只重转录异常时间窗 | Phase 1.5 实现 |
 | CLEANED | `analysis/transcript_clean.{json,md}` | 忠实纠错、断句、标点与不确定性标记 | Phase 2A 实现 |
 | STRUCTURED | `analysis/outline.json` | 课堂结构与时间范围 | Phase 2B 工程已实现 |
-| KNOWLEDGE | `analysis/knowledge.json`、`analysis/unresolved_visual.json` | 知识项与待板书解析引用 | Phase 2C，未实现 |
+| KNOWLEDGE | `analysis/knowledge.json`、`analysis/unresolved_visual.json` | 知识项与待板书解析引用 | Phase 2C 工程已实现 |
 | NOTE | `note/lecture_audio_draft.md` | 仅基于音频的课堂草稿 | Phase 2D，未实现 |
 
 任何下游步骤都不得回写上游文件。
@@ -33,6 +33,8 @@ Session 顶层状态继续表示跨媒介主流程。纯文本增强不新增顶
 
 - `repair`: `pending | running | done | failed | skipped`
 - `clean`: `pending | running | done | failed | skipped`
+- `structure`: `pending | running | done | failed | skipped`
+- `knowledge`: `pending | running | done | failed | skipped`
 
 步骤失败只使该步骤失败，不破坏 Phase 1 已完成状态和已有产物。重试从缓存和最近成功
 产物继续。
@@ -159,18 +161,27 @@ lecture-ai clean  SESSION [--dry-run] [--chunk INDEX] [--force]
 ### Phase 2C：结构化知识抽取
 
 输入 CLEANED + `outline.json`，使用 `prompts/concept_extraction.md`，输出
-`analysis/knowledge.json` 与 `analysis/unresolved_visual.json`。计划 schema 包含：`concepts`、
+`analysis/knowledge.json` 与 `analysis/unresolved_visual.json`。正式 schema 包含：`concepts`、
 `equations`、`examples`、`teacher_emphasis`、`exam_tips`、`common_errors`、`open_questions`、
 `visual_references`、`uncertain_items`。所有知识项必须引用 source segment ids；音频无法恢复的
 公式或图不得由模型补写，而是进入 unresolved visual 队列。
 
-计划接口：`KnowledgePipeline.run(session_id) -> (LectureKnowledge, UnresolvedVisuals)`。
+实现接口：`KnowledgePipeline.run(session_id) -> KnowledgeOutcome`。仅接受当前 Session 的正式
+CLEANED 与由它生成的 STRUCTURED；两层文件 SHA、prompt/schema、concept threshold、
+provider/model 共同进入 fingerprint。每个知识项必须位于引用的 topic 内；outline 已识别的
+定义、推导、例题、强调和考试提示不得静默丢失。公式必须能在来源文本中找到基本符号/数字/
+术语证据，不完整公式必须进入 `uncertain_items`，CLEANED 的 uncertainty 与 visual reference
+也必须完整路由。输出不修改任何上游文件。
+
+`chatgpt_web` 生成 `analysis/knowledge_web/extract/`，由统一手机 ZIP 协议收发；返回内容在本地
+经过 schema、来源、topic、公式证据及队列覆盖校验，坏响应可恢复封存并自动生成返工包。
+
 Phase 3 预留接口：`VisualResolver.resolve(reference, images_by_exif_time)`，用 reference 的
 `timestamp/context/reference_type/confidence` 与照片 EXIF 时间对齐，再生成一份新的融合层，
 不得回写 CLEANED/KNOWLEDGE。
 
-测试计划：FakeLLM 覆盖公式缺失、板书引用、同一概念多处来源、不确定项；拒绝无 source id
-的知识、模型凭空补出的公式和未进入 unresolved queue 的视觉依赖。
+FakeLLM 测试已覆盖公式缺失、板书引用、不确定项、低重要度、未知/跨 topic 来源；拒绝无
+source id 的知识、模型凭空补出的公式、outline 要素丢失和未进入 unresolved queue 的依赖。
 
 ### Phase 2D：Audio-only Lecture Draft
 
@@ -183,4 +194,4 @@ Phase 3 预留接口：`VisualResolver.resolve(reference, images_by_exif_time)`�
 测试计划：快照测试 note 结构；检查所有正文块有 provenance；视觉未决项必须呈现为
 `[!question]`，不得伪装成已解决；禁止生成 WikiLinks、Concept Notes 或写入 Obsidian Vault。
 
-Phase 2C / 2D 仍只有接口与测试计划，尚未实现。
+Phase 2D 仍只有接口与测试计划，尚未实现。
