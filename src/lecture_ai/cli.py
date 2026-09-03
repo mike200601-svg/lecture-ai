@@ -238,6 +238,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     report("知识抽取 prompt", knowledge_prompt.exists(), str(knowledge_prompt))
     draft_prompt = config.paths.project_root / "prompts" / "lecture_note.md"
     report("课堂草稿 prompt", draft_prompt.exists(), str(draft_prompt))
+    report(
+        "Phase 2 自动推进",
+        True if config.processing.auto_advance_phase2 else None,
+        (
+            "启用 · 严格校验通过后自动生成下一阶段手机任务包，最终停在 Phase 2D QA"
+            if config.processing.auto_advance_phase2
+            else "关闭 · 每阶段停在独立 QA 状态"
+        ),
+    )
     if config.llm.provider == "chatgpt_web":
         report(
             "文本 LLM",

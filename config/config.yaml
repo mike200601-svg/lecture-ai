@@ -56,6 +56,7 @@ audio:
 # ---------------------------------------------------------------- 处理流程
 processing:
   auto_process: true                        # watch 发现文件后是否立即处理
+  auto_advance_phase2: true                 # 网页结果通过严格校验后自动生成下一阶段任务包，直到 2D QA
   poll_interval: 15                         # watch 轮询间隔（秒）
   stable_checks: 2                          # 连续几次采样大小/时间不变才算写入完成
   quiet_seconds: 10                         # 距最后修改至少多少秒

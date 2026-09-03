@@ -202,3 +202,8 @@ Markdown SHA 回写机器审计 JSON；任一上游变化只使草稿缓存失�
 `chatgpt_web` 使用 `analysis/audio_draft_web/draft/` 与统一手机 ZIP 协议；坏响应封存后生成
 返工包。FakeLLM 与端到端测试覆盖 topic/item 丢失、重复、跨 topic、provenance 不全、WikiLink
 偷渡、未决 callout、缓存复用和手机返回包自动续跑。
+
+生产配置 `processing.auto_advance_phase2=true` 时，统一 watcher 在当前网页返回包通过本地严格
+校验并写成正式产物后，立即生成下一阶段 ZIP：`CLEANED -> STRUCTURED -> KNOWLEDGE ->
+AUDIO_DRAFT`。过程中仍保留每层不可变文件、fingerprint、缓存和独立状态；自动推进只免去 Codex
+或命令行接力，不放宽任何质量门。最终停在 `ready_for_phase2d_qa`。关闭该开关则恢复逐阶段 QA。

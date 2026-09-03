@@ -40,8 +40,9 @@
   outline 要素丢失会被拒绝。
 - CLEANED uncertainty、残缺公式与视觉引用必须进入显式未决队列；视觉项另外落盘到
   `analysis/unresolved_visual.json`，保留给 Phase 3，不把猜测伪装成事实。
-- `knowledge` CLI、缓存/输入变更失效、网页坏响应隔离和统一手机 ZIP 自动收发均已接通；
-  产物通过后停在 `ready_for_phase2c_qa`，不越过人工门。
+- `knowledge` CLI、缓存/输入变更失效、网页坏响应隔离和统一手机 ZIP 自动收发均已接通。
+- 生产配置已启用 `processing.auto_advance_phase2`：2A/2B/2C 返回包通过严格校验后自动生成
+  下一阶段手机 ZIP，无需 Codex 接力；2D 完成后才停在最终 QA。
 
 ## 2026-09-03：Phase 2D 工程实现
 
@@ -54,7 +55,7 @@
 - 视觉引用、听辨疑点与残缺公式确定性渲染为 `[!question]`；草稿固定 `AUDIO_ONLY`、
   `final: false`，禁止 WikiLink、概念页、课程索引和 Obsidian Vault 写入。
 - `draft` CLI 与统一手机 ZIP/watcher 已接通，返回包通过后停在 `ready_for_phase2d_qa`。
-- 当前完整回归：**291 passed**；Gold 仍在等待 6 个 Phase 2A boundary 网页结果，没有越级生成
+- 当前完整回归：**292 passed**；Gold 仍在等待 6 个 Phase 2A boundary 网页结果，尚未生成
   outline、knowledge 或 audio draft。
 
 ---

@@ -92,6 +92,7 @@ class AudioConfig:
 @dataclass
 class ProcessingConfig:
     auto_process: bool = True
+    auto_advance_phase2: bool = False
     poll_interval: int = 15
     stable_checks: int = 2
     quiet_seconds: int = 10

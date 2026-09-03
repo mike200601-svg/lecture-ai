@@ -3,7 +3,7 @@
 把大学理工科课堂的录音（以后还有板书照片）自动变成结构化的 Obsidian 笔记。
 
 **当前进度：Phase 1/1.5 已完成；Phase 2A Canary 已通过且 Gold 全量网页核验进行中；
-Phase 2B/2C/2D 工程已完成，等待正式上游产物后逐阶段真实 QA。**
+Phase 2B/2C/2D 工程已完成，等待 Gold 网页链完成后做真实产物 QA。**
 
 ```text
 荣耀录音机 → Syncthing-Fork → Session → Whisper RAW → 选择性 REPAIRED
@@ -123,7 +123,8 @@ prompt 更新时旧 response/cache/CLEANED 会改名封存，不会静默覆盖�
 2. 将 ZIP 写入 `data/web_exchange/<session>/to_phone/`；
 3. 监听 `data/web_exchange/<session>/from_phone/`；
 4. 对返回包逐项校验，合格项进正式 cache，不合格项封存并自动生成下一份返工包；
-5. 全部通过后自动组装当前阶段产物并停在对应人工 QA 门，不会自动越级启动下一阶段。
+5. 全部通过后自动组装当前阶段产物；生产配置 `processing.auto_advance_phase2: true`
+   会随即生成下一阶段任务包，直到 Phase 2D 完成后停在最终 QA。
 
 ZIP 内的 `README.md` 是给 GPT 网页的完整任务说明。把整包上传给 GPT，下载它返回的 ZIP，
 原样放进 `from_phone/` 即可；不得修改或丢弃 `manifest.json`。共享目录中的 `state.json`
@@ -139,6 +140,7 @@ Phase 2C 的 `knowledge` 命令只读取同一 Session 的正式 CLEANED 与 `ou
 所有概念、公式、例题和强调都必须引用来源 segment，模型不得补全音频中残缺的公式。
 CLEANED 中的不确定项与视觉引用必须全部进入显式队列，留给人工或 Phase 3 解决。网页结果
 沿用同一手机 ZIP 协议，严格校验后自动落盘并停在 `ready_for_phase2c_qa`。
+独立运行时该状态可单独验收；启用自动推进后会直接继续生成 Phase 2D 手机任务包。
 
 Phase 2D 的 `draft` 命令只读取通过来源校验的 STRUCTURED、KNOWLEDGE 与视觉未决队列。
 GPT 网页只返回严格的章节编排 JSON，不直接自由输出 Markdown；本地渲染器确定性生成

@@ -193,3 +193,62 @@ def test_audio_draft_uses_same_phone_batch_and_auto_resumes(config, db, tmp_path
     assert outcome.accepted == 1 and outcome.rejected == 0
     assert (session_dir / "analysis" / "audio_draft.json").exists()
     assert (session_dir / "note" / "lecture_audio_draft.md").exists()
+
+
+def test_phase2_auto_advance_builds_each_next_phone_package(config, db, tmp_path):
+    meta, session_dir = _make_session(config, db, repaired=True)
+    config.llm.provider = "chatgpt_web"
+    config.llm.model = "chatgpt-web-high"
+    config.privacy.allow_cloud_transcript = True
+    config.processing.auto_advance_phase2 = True
+    service = CleanWebBatchService(config, db)
+
+    clean_package = service.prepare(meta.session_id)
+    after_clean = service.receive(
+        meta.session_id,
+        _return_directory(Path(clean_package.package_dir), tmp_path / "auto_clean"),
+    )
+    assert after_clean.status == "waiting_for_web"
+    assert after_clean.task_ids == ["structure_outline"]
+
+    source = json.loads(
+        (session_dir / "analysis" / "transcript_clean.json").read_text(encoding="utf-8")
+    )["segments"]
+    after_structure = service.receive(
+        meta.session_id,
+        _return_directory(
+            Path(after_clean.package_dir),
+            tmp_path / "auto_structure",
+            responder=lambda _: _outline(source),
+        ),
+    )
+    assert after_structure.status == "waiting_for_web"
+    assert after_structure.task_ids == ["knowledge_extract"]
+
+    after_knowledge = service.receive(
+        meta.session_id,
+        _return_directory(
+            Path(after_structure.package_dir),
+            tmp_path / "auto_knowledge",
+            responder=lambda _: _knowledge(),
+        ),
+    )
+    assert after_knowledge.status == "waiting_for_web"
+    assert after_knowledge.task_ids == ["audio_draft_draft"]
+
+    outline = json.loads(
+        (session_dir / "analysis" / "outline.json").read_text(encoding="utf-8")
+    )
+    knowledge = json.loads(
+        (session_dir / "analysis" / "knowledge.json").read_text(encoding="utf-8")
+    )
+    finished = service.receive(
+        meta.session_id,
+        _return_directory(
+            Path(after_knowledge.package_dir),
+            tmp_path / "auto_draft",
+            responder=lambda _: _draft(outline, knowledge),
+        ),
+    )
+    assert finished.status == "ready_for_phase2d_qa"
+    assert (session_dir / "note" / "lecture_audio_draft.md").is_file()

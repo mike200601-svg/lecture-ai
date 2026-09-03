@@ -268,6 +268,19 @@ class CleanWebBatchService:
         rejected = max(0, staged - accepted)
 
         if not outcome.partial:
+            if (
+                self.config.processing.auto_advance_phase2
+                and pipeline_name != "audio_draft"
+            ):
+                advanced = self._advance_after(session_id, pipeline_name)
+                advanced.accepted = accepted
+                advanced.rejected = rejected
+                advanced.message = (
+                    f"{pipeline_name} 本批接受 {accepted}、拒绝 {rejected}；"
+                    f"已自动推进下一阶段。{advanced.message}"
+                )
+                self._write_state(advanced)
+                return advanced
             status = {
                 "clean": "ready_for_phase2a_qa",
                 "structure": "ready_for_phase2b_qa",
@@ -306,6 +319,29 @@ class CleanWebBatchService:
         )
         self._write_state(followup)
         return followup
+
+    def _advance_after(
+        self, session_id: str, completed_pipeline: str
+    ) -> WebBatchOutcome:
+        """从已完成阶段向后推进，遇到下一份网页包或最终 2D QA 时停止。"""
+        order = ("clean", "structure", "knowledge", "audio_draft")
+        prepare = {
+            "structure": self.prepare_structure,
+            "knowledge": self.prepare_knowledge,
+            "audio_draft": self.prepare_audio_draft,
+        }
+        try:
+            start = order.index(completed_pipeline) + 1
+        except ValueError as exc:
+            raise LLMError(f"无法自动推进未知 pipeline：{completed_pipeline}") from exc
+        latest: WebBatchOutcome | None = None
+        for pipeline_name in order[start:]:
+            latest = prepare[pipeline_name](session_id)
+            if latest.status == "waiting_for_web" or pipeline_name == "audio_draft":
+                return latest
+        if latest is None:
+            raise LLMError(f"pipeline {completed_pipeline} 后没有可推进阶段")
+        return latest
 
     def run_once(self) -> list[WebBatchOutcome]:
         """供总 watcher 调用：处理稳定返回 ZIP，并维护所有活动清洗批次。"""
@@ -367,7 +403,12 @@ class CleanWebBatchService:
             drafting = (analysis / "audio_draft_web").is_dir() and not (
                 analysis / "audio_draft.json"
             ).is_file()
-            if cleaning or structuring or extracting or drafting:
+            chained = (
+                self.config.processing.auto_advance_phase2
+                and (analysis / "clean_web").is_dir()
+                and not (analysis / "audio_draft.json").is_file()
+            )
+            if cleaning or structuring or extracting or drafting or chained:
                 active.append(session_id)
         return active
 
