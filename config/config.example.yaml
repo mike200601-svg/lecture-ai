@@ -1,3 +1,7 @@
+# 复制为 config/config.yaml 后按需修改（config.yaml 已被 .gitignore 忽略）。
+#   Windows PowerShell:  Copy-Item config/config.example.yaml config/config.yaml
+#   macOS / Linux:       cp config/config.example.yaml config/config.yaml
+# 文件缺失时程序不会崩溃，会全部走默认值。
 # 课堂自动笔记系统 —— 主配置
 # 规则：
 #   1. 任何 API key 都不许写在这里，只能放 .env（写了会被 config 加载器直接拒绝）
@@ -9,22 +13,24 @@ paths:
   incoming_images: data/incoming/images     # Phase 3 才会用
   web_exchange: data/web_exchange           # 与手机双向同步：GPT 批处理包往返
   # 日常 GPT 网页投喂包。每节课及包内文件均带日期、时间和课程名。
-  export_dir: "<paths.export_dir>"
+  # 若你把某个目录设成了 Obsidian Vault，务必把本目录放在 Vault 之外：
+  # 投喂包里的转录/提示词/包说明都是 .md，会被 Obsidian 当成笔记，淹没真正的成稿。
+  export_dir: exports/gpt_web
   session_dir: data/sessions
   processed_dir: data/processed
   cache_dir: data/cache
   log_dir: logs
   database: data/lecture_ai.db
-  obsidian_vault: ""                        # Phase 4 才需要，例如 D:/Obsidian/MyVault
+  obsidian_vault: ""                        # 可选，例如 D:/Obsidian/MyVault；留空表示不启用
 
 # ---------------------------------------------------------------- 转录
 transcription:
   provider: local_whisper                   # local_whisper | openai | fake
 
   local_whisper:
-    # 本机为 Intel Core Ultra 5 225H + Arc 130T（无 CUDA），故走 CPU int8。
-    # medium 已手动下载到项目 models/，使用本地目录避免运行时联网。
-    # 若以后换成 NVIDIA 机器：model: large-v3 / device: cuda / compute_type: float16
+    # 默认按「无 CUDA 的笔记本」配置：CPU + int8。
+    # 把 medium 手动下载到项目 models/ 下，可避免运行时联网（见 README「模型准备」）。
+    # 有 NVIDIA 显卡时改为：model: large-v3 / device: cuda / compute_type: float16
     model: models/faster-whisper-medium
     device: cpu                             # cpu | cuda | auto
     compute_type: int8                      # int8 | int8_float16 | float16 | float32
@@ -101,6 +107,14 @@ llm:
   model: chatgpt-web-high                  # 网页端“高”模式；不伪装成 API 模型名
   max_tokens: 8000
   temperature: 0.2
+
+# ---------------------------------------------------------------- API 路线成稿
+# `lecture-ai note <session>`：把 REPAIRED 一次性交给 API 出成稿（A/B 选出的 B 路线）。
+# 只发送文本，**永远不发送板书照片或课件**；有图的课请走 export-package + 网页会话。
+# 需要 llm.provider = openai，并在 .env 里填 OPENAI_API_KEY。
+note:
+  max_output_tokens: 32000                  # 整篇笔记很长；沿用 llm.max_tokens(8000) 会被静默截断
+  temperature: 0.3
 
 vision:
   provider: anthropic

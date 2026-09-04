@@ -9,6 +9,10 @@ logs/**
 # ---- 密钥 ----
 .env
 
+# ---- 个人配置：只发布 *.example.yaml，真实配置留在本地 ----
+config/config.yaml
+config/courses.yaml
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

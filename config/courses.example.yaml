@@ -1,0 +1,48 @@
+# 复制为 config/courses.yaml 后填写你自己的课表（courses.yaml 已被 .gitignore 忽略）。
+#   Windows PowerShell:  Copy-Item config/courses.example.yaml config/courses.yaml
+#   macOS / Linux:       cp config/courses.example.yaml config/courses.yaml
+# 文件缺失时不报错，所有录音都会落到 unknown 课程，事后可用 `lecture-ai relabel` 归属。
+#
+# 用途：
+#   1. 录音进来时，按录音起始时间自动匹配课程 → 决定 session_id 和 glossary
+#   2. 决定 Obsidian Vault 里的目录归属（若启用）
+#
+# weekday: 1=周一 ... 7=周日
+# 匹配容差由 config.yaml 的 course.match_tolerance_minutes 控制（默认 ±30 分钟）
+#
+# 下面是**示例课表**，时间是编的，请全部替换成你自己的。
+# glossary 指向 config/glossary/ 下的术语表文件，用于提升专业名词的转录准确率；
+# 仓库自带几份理工科示例词表，你也可以自己新建。
+
+courses:
+  quantum_mechanics:
+    name: 量子力学
+    teacher: ""                 # 可留空。填了只写进本地 metadata，不会外发
+    semester: 2026-秋
+    glossary: quantum_mechanics.txt
+    obsidian_folder: University/量子力学
+    schedule:
+      - weekday: 3
+        start: "08:00"
+        end: "09:40"
+
+  digital_electronics:
+    name: 数字电子技术基础
+    teacher: ""
+    semester: 2026-秋
+    glossary: digital_electronics.txt
+    obsidian_folder: University/数字电子技术基础
+    schedule:
+      - weekday: 2
+        start: "10:00"
+        end: "11:40"
+      - weekday: 4              # 一门课可以有多个时段
+        start: "14:00"
+        end: "15:40"
+
+  # 兜底课程：匹配不到任何课表时使用，不要删除
+  unknown:
+    name: 未归类
+    glossary: ""
+    obsidian_folder: University/未归类
+    schedule: []

@@ -5,8 +5,14 @@ param(
 
     [string]$ProjectRoot = "",
     [string]$SyncUser = "lecture_sync",
-    [string]$PcTailscaleIp = "<PC_TAILSCALE_IP>",
-    [string]$PhoneTailscaleIp = "<PHONE_TAILSCALE_IP>",
+    # Tailscale IP 必须由调用方提供：脚本会据此放行防火墙与 SFTP 访问，
+    # 写死任何人的地址都是错的（也不该出现在公开仓库里）。
+    # 查看方法：电脑与手机上分别运行 `tailscale ip -4`。
+    [Parameter(Mandatory = $true)]
+    [string]$PcTailscaleIp,
+
+    [Parameter(Mandatory = $true)]
+    [string]$PhoneTailscaleIp,
     [string]$ErrorLogPath = "$env:TEMP\lecture-ai-sftp-setup-error.log"
 )
 
