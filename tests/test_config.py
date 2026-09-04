@@ -59,13 +59,30 @@ def test_empty_secret_placeholder_is_allowed(project_root):
     assert cfg is not None
 
 
-def test_env_interpolation(project_root, monkeypatch):
-    monkeypatch.setenv("MY_VAULT", "D:/SomeVault")
+def test_env_interpolation(project_root, tmp_path, monkeypatch):
+    """${ENV_VAR} 会被展开；展开出的绝对路径原样保留。
+
+    这里必须用 tmp_path 造绝对路径，不能写死 ``D:/SomeVault`` ——
+    那个字面量只在 Windows 上是绝对路径，在 POSIX 上是相对路径，
+    会被正确地拼到项目根下面，于是测试在 Linux/macOS 上必挂。
+    """
+    vault = tmp_path / "SomeVault"
+    monkeypatch.setenv("MY_VAULT", vault.as_posix())
     (project_root / "config" / "config.yaml").write_text(
         "paths:\n  obsidian_vault: ${MY_VAULT}\n", encoding="utf-8"
     )
     cfg = load_config(project_root / "config" / "config.yaml", project_root=project_root)
-    assert cfg.paths.obsidian_vault == Path("D:/SomeVault")
+    assert cfg.paths.obsidian_vault == vault
+
+
+def test_env_interpolation_relative_value_resolves_under_project_root(project_root, monkeypatch):
+    """展开出来的相对路径按项目根解析 —— 这正是上面那个测试踩过的坑。"""
+    monkeypatch.setenv("MY_VAULT", "vaults/mine")
+    (project_root / "config" / "config.yaml").write_text(
+        "paths:\n  obsidian_vault: ${MY_VAULT}\n", encoding="utf-8"
+    )
+    cfg = load_config(project_root / "config" / "config.yaml", project_root=project_root)
+    assert cfg.paths.obsidian_vault == project_root / "vaults" / "mine"
 
 
 def test_absolute_path_preserved(project_root, tmp_path):
