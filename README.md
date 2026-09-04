@@ -95,29 +95,124 @@ A/B 对照显示它不比直接整理捞到更多知识项，却丢掉了推导�
 
 ## 快速开始
 
+下面每一步都写清楚**在哪个目录、改哪个文件**。没用过 Python 也能照着走完。
+
+预计时间：安装 10 分钟，第一次转录另需 40–60 分钟（可以挂着不管）。
+
 ### 环境要求
 
-- Python 3.11+（开发机用 3.13/3.14）
-- ffmpeg（含 ffprobe 更好）
-- 不需要显卡。没有 NVIDIA 卡时走 CPU + int8，实测转录耗时约为录音时长的
-  **0.44–0.67 倍**（100 分钟的课约 45–65 分钟，可以挂着不管）
+- **Python 3.11 或更高**
+- **git**
+- **ffmpeg**（第 3 步会装）
+- **不需要显卡。** 没有 NVIDIA 卡时走 CPU，实测转录耗时约为录音时长的
+  **0.44–0.67 倍**（100 分钟的课约 45–65 分钟）
+- 硬盘留 3 GB 以上（语音模型约 1.5 GB）
 
-### 1. 安装
+### 0. 先确认 Python 和 git 装好了
 
-**Windows（PowerShell）**
+随便打开一个 PowerShell 窗口（按 `Win` 键，输入 `powershell`，回车），逐条粘进去：
 
 ```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -U pip
-python -m pip install -e ".[dev,asr,ffmpeg]"
-
-# ffmpeg（二选一）
-winget install Gyan.FFmpeg     # 推荐：功能完整，自带 ffprobe，装完重开终端
-pip install imageio-ffmpeg     # 备选：无需管理员权限，但不含 ffprobe
+python --version
+git --version
 ```
 
-**macOS / Linux**
+正常应该分别打印类似 `Python 3.13.2` 和 `git version 2.4x.x`。
+
+- **提示"找不到命令"，或者弹出微软应用商店** → 说明没装。去
+  [python.org/downloads](https://www.python.org/downloads/) 下载安装，
+  安装第一屏**务必勾上 `Add python.exe to PATH`**（很容易漏，漏了就得重装）。
+  git 去 [git-scm.com](https://git-scm.com/download/win) 下载，一路下一步即可。
+- **装完要关掉 PowerShell 重新开一个**，否则新命令不生效。
+
+### 1. 选个文件夹，把项目下载下来
+
+**放哪个盘、哪个目录都行**，唯一要求是路径你自己找得到，建议不要有空格。
+下面以 `D:\` 为例。
+
+**在目标文件夹里打开 PowerShell**，两种方式任选：
+
+- 用文件资源管理器进到 `D:\`，在**空白处按住 `Shift` 再右键** →
+  点「在此处打开 PowerShell 窗口」；
+- 或者随便开一个 PowerShell，然后手动切目录：
+
+  ```powershell
+  cd D:\
+  ```
+
+确认自己站在哪个目录（随时可以用）：
+
+```powershell
+pwd
+```
+
+然后把项目下载下来：
+
+```powershell
+git clone https://github.com/mike200601-svg/lecture-ai.git
+cd lecture-ai
+```
+
+`git clone` 会在当前目录下**新建一个 `lecture-ai` 文件夹**（例如
+`D:\lecture-ai`），项目所有文件都在里面。`cd lecture-ai` 是进到这个文件夹。
+
+> **从这里开始，本文所有命令都在 `D:\lecture-ai` 里执行。**
+> 中途关了窗口重开的话，记得先 `cd D:\lecture-ai` 再继续。
+
+### 2. 建一个独立的 Python 环境，然后安装
+
+**为什么要这一步**：venv（虚拟环境）会在项目里建一个专属的 Python，本项目要用的
+包只装在里面，不会污染你系统里的 Python，也不会和别的项目打架。删掉整个项目文件夹
+就等于卸载干净。
+
+在 `D:\lecture-ai` 里依次执行：
+
+```powershell
+# 建虚拟环境，会生成一个 .venv 文件夹
+py -3.13 -m venv .venv
+
+# 激活它。成功后命令行开头会多出 (.venv) 字样
+.\.venv\Scripts\Activate.ps1
+
+# 装本项目和它的依赖
+python -m pip install -U pip
+python -m pip install -e ".[dev,asr,ffmpeg]"
+```
+
+关于这几条：
+
+- `py -3.13` 里的版本号换成你实际装的即可，比如 `py -3.12`；只装了一个版本时
+  直接写 `python -m venv .venv` 也行。
+- **激活报错**"无法加载文件…因为在此系统上禁止运行脚本"→ 这是 Windows 默认的
+  脚本策略。执行下面这条（只影响当前用户，安全），然后重新激活：
+
+  ```powershell
+  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+  ```
+- `.[dev,asr,ffmpeg]` 里的 `.` 指"当前目录这个项目"，方括号里是可选功能组：
+  `dev` = 测试工具，`asr` = 本地语音识别，`ffmpeg` = 自带一份 ffmpeg 免得你另外装。
+- **以后每次新开窗口都要先激活**（`cd` 过去 + 跑一遍 `Activate.ps1`），
+  否则命令找不到。
+
+只有以后想用 API 出稿（`note` 命令）时，再多装一个：
+
+```powershell
+python -m pip install -e ".[cloud]"
+```
+
+装完验证一下：
+
+```powershell
+python -m lecture_ai --version
+```
+
+应该打印 `lecture-ai 1.0.0`。
+
+> 装完可能有个警告说 `lecture-ai.exe` 不在 PATH 上，**可以无视**。
+> 本文统一用 `python -m lecture_ai`，效果完全一样。
+
+<details>
+<summary>macOS / Linux 的对应命令</summary>
 
 ```bash
 python3 -m venv .venv
@@ -125,69 +220,139 @@ source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -e ".[dev,asr,ffmpeg]"
 
-brew install ffmpeg                      # macOS
-sudo apt-get install ffmpeg              # Debian / Ubuntu
+brew install ffmpeg              # macOS
+sudo apt-get install ffmpeg      # Debian / Ubuntu
 ```
 
-**用 uv（更快）**
+装过 [uv](https://github.com/astral-sh/uv) 的话更快：
 
 ```bash
 uv venv && uv pip install -e ".[dev,asr,ffmpeg]"
 ```
 
-只有要用 API provider（`note` 命令 / 云端清洗）时才需要额外装：
+</details>
 
-```bash
-python -m pip install -e ".[cloud]"      # 或 uv pip install -e ".[cloud]"
-```
+### 3. 准备两个配置文件
 
-> `pip install -e .` 后 `lecture-ai` 命令可能不在 PATH 上。
-> `python -m lecture_ai` 效果完全一样，本文档统一用后者。
+项目的行为由 `config` 文件夹里两个文本文件决定：
 
-### 2. 配置
+| 文件 | 管什么 |
+|---|---|
+| `config\config.yaml` | 路径、用哪个语音模型、各种开关 |
+| `config\courses.yaml` | 你的课表（用来自动判断某段录音是哪门课） |
 
-配置文件不进版本库（里面是私人路径和课表），从示例复制：
+**这两个文件在刚下载的项目里是不存在的**，只有 `.example.yaml` 结尾的模板。
+因为它们装的是各人自己的路径和课表，所以不放进仓库。你要先复制一份：
 
 ```powershell
-Copy-Item config/config.example.yaml  config/config.yaml
-Copy-Item config/courses.example.yaml config/courses.yaml
-Copy-Item .env.example                .env          # 只有用云端 API 时才需要填
+Copy-Item config\config.example.yaml  config\config.yaml
+Copy-Item config\courses.example.yaml config\courses.yaml
 ```
 
-macOS / Linux 用 `cp`。两个 yaml 缺失时程序不会崩溃，只会走默认值、所有录音归入
-`unknown`（事后可用 `relabel` 归属）。
+`Copy-Item` 就是"复制"：把前一个文件复制成后一个名字。等价于你在资源管理器里
+进 `config` 文件夹、把 `config.example.yaml` 复制粘贴一份、改名成 `config.yaml`。
+（macOS / Linux 上这条命令叫 `cp`。）
 
-### 3. 模型准备
+**怎么打开编辑**——用记事本就够：
+
+```powershell
+notepad config\config.yaml
+```
+
+装过 VS Code 的话 `code config\config.yaml` 更舒服（有语法高亮）。
+
+#### 看懂 yaml 文件：三条规则
+
+后面几步会让你改这两个文件里的某一行。它们是 **YAML** 格式，只需要知道三点：
+
+1. **缩进表示层级**，用「名字: 值」的形式一层层嵌套。比如
+
+   ```yaml
+   transcription:          # 第 1 层
+     local_whisper:        # 第 2 层，缩进 2 格
+       device: cpu         # 第 3 层，缩进 4 格
+   ```
+
+   这表示"transcription 底下的 local_whisper 底下的 device 等于 cpu"。
+
+2. **缩进只能用空格，绝对不能用 Tab 键。** 这是 YAML 最常见的报错原因。
+3. **`#` 后面到行尾都是注释**，程序不看，是给人读的。
+
+**你要做的只是改某一行的值，不要动它的缩进。** 后面每次都会告诉你改哪一行。
+
+> 两个 yaml 文件缺失时程序也不会崩，只是全部走内置默认值、所有录音归到
+> `unknown` 课程（事后可以用 `relabel` 命令重新归类）。所以你就算这一步搞错了
+> 也修得回来。
+
+### 4. 体检
+
+配置就绪后，先让程序自查一遍环境：
 
 ```powershell
 python -m lecture_ai doctor
 ```
 
-`doctor` 会检查 ffmpeg、模型完整性（`model.bin` / `config.json` / `tokenizer.json` /
-`vocabulary.txt`）、并**实际初始化一次模型**，然后报 READY / PARTIAL / MISSING。
+它会逐项打印结果，每行开头的标记含义：
 
-**默认开箱可用**：示例配置里填的是 HuggingFace 模型名，首次转录时会自动把权重
-下载到 `data/cache/models`（需联网，medium 约 1.5 GB）。
+| 标记 | 含义 | 要不要管 |
+|---|---|---|
+| `[ OK ]` | 正常 | 不用管 |
+| `[WARN]` | 能跑，但有更好的选择 | 可以先不管 |
+| `[FAIL]` | 会阻塞真实使用 | 要处理，**每条都带修复建议** |
+
+**第一次跑一定会有一条 `[FAIL] 模型 ... MISSING`** —— 那是正常的初始状态，
+语音模型还没下载。下一步就是解决它。
+
+### 5. 语音模型
+
+转录靠的是本地的 faster-whisper 语音模型（一份约 1.5 GB 的权重文件）。
+它不在仓库里，需要单独获取——有两条路。
+
+#### 路线 A：什么都不用改（推荐）
+
+刚才复制出来的 `config\config.yaml` **默认就是这个方案**，你不需要动任何东西：
+
+打开 `config\config.yaml`，能看到这样一段（大约在文件前 1/3 处）：
 
 ```yaml
 transcription:
+  provider: local_whisper
+
   local_whisper:
-    model: medium        # HF 模型名，自动下载
-    device: cpu
-    compute_type: int8
+    # 默认按「无 CUDA 的笔记本」配置：CPU + int8。
+    # 这里填 HuggingFace 模型名，首次转录会自动下载到 data/cache/models，开箱可用。
+    model: medium               # ← 这一行就是模型设置
+    device: cpu                 # ← 用 CPU 还是显卡
+    compute_type: int8          # ← 计算精度，CPU 上用 int8 最快
 ```
 
-`doctor` 在权重还没缓存时会报一条 FAIL —— 那是**正常的初始状态**，第一次转录跑完
-就变 OK；只是它没法替你判断你是否打算联网，所以宁可报出来。
+`model: medium` 是一个**在线模型名**（来自 HuggingFace 模型库）。
+第一次真正开始转录时，程序会自动把这 1.5 GB 下载到项目内的
+`data\cache\models` 文件夹，之后就一直复用，不会重复下载。
 
-**想离线跑或预先下载**：把权重放进 `models/faster-whisper-medium/`，再把 `model`
-改成相对路径。相对路径按项目根解析，`models/` 已被 gitignore，权重不进 Git。
+也就是说：**这条路你不用改配置、不用手动下载，只要第一次转录时能联网。**
 
-```yaml
-    model: models/faster-whisper-medium
-```
+#### 路线 B：预先下载 / 想离线跑
 
-有 NVIDIA 显卡时只改配置，代码不动：
+如果第一次转录时不方便联网，或者你想先把模型下好：
+
+1. 从 HuggingFace 下载 `Systran/faster-whisper-medium` 的全部文件，放进项目里的
+   `models\faster-whisper-medium\` 文件夹（自己新建），里面应包含
+   `model.bin`、`config.json`、`tokenizer.json`、`vocabulary.txt`。
+2. 然后把上面那段配置里的 `model` 那一行改成：
+
+   ```yaml
+       model: models/faster-whisper-medium
+   ```
+
+   注意**保持原有缩进**（前面 4 个空格），只改冒号后面的值。相对路径按项目根目录
+   解析，也就是 `D:\lecture-ai\models\faster-whisper-medium`。
+
+`models\` 文件夹已被 git 忽略，权重不会进版本库。
+
+#### 有 NVIDIA 显卡的话
+
+只改配置，代码不用动——把那三行改成：
 
 ```yaml
     model: large-v3
@@ -195,46 +360,96 @@ transcription:
     compute_type: float16
 ```
 
-想自己实测选档位：
+#### 想自己比较不同模型的效果
 
 ```powershell
-python scripts/bench_asr.py <一段10~15分钟真实课堂录音> --models "medium,large-v3-turbo"
+python scripts\bench_asr.py <一段10~15分钟的真实课堂录音> --models "medium,large-v3-turbo"
 ```
 
-`tiny` 只用于单元测试，不能作为真实课堂模型。
+`tiny` 只用于跑单元测试，识别质量不够，不要用于真实课堂。
 
-### 4. 填课表
+### 6. 填你的课表
 
-编辑 `config/courses.yaml`（模板见 [config/courses.example.yaml](config/courses.example.yaml)）：
+程序按**录音的起始时间**自动判断这是哪门课，所以要先告诉它你的课表。
+
+```powershell
+notepad config\courses.yaml
+```
+
+打开后把里面的示例课程整段替换成你自己的。文件结构是这样：
 
 ```yaml
-courses:
-  quantum_mechanics:
-    name: 量子力学
-    glossary: quantum_mechanics.txt      # 术语表，提升专业名词准确率
-    schedule:
-      - weekday: 3                        # 1=周一
-        start: "14:00"
-        end: "15:40"
+courses:                                  # 固定写法，别改
+  quantum_mechanics:                      # 课程代号：只能用英文小写和下划线，自己起
+    name: 量子力学                         # 显示名称，会出现在文件名里
+    teacher: ""                           # 可留空
+    semester: 2026-秋                      # 可留空
+    glossary: quantum_mechanics.txt       # 术语表文件名，提升专业名词准确率
+    obsidian_folder: University/量子力学    # 以后进 Obsidian 时的目录
+    schedule:                             # 这门课每周上课的时段，可以有多个
+      - weekday: 3                        # 1=周一, 2=周二 … 7=周日
+        start: "09:45"                    # 上课时间，必须带引号
+        end: "11:25"                      # 下课时间
+      - weekday: 5                        # 同一门课的第二个时段
+        start: "10:00"
+        end: "11:40"
+
+  unknown:                                # 兜底课程，不要删
+    name: 未归类
+    glossary: ""
+    obsidian_folder: University/未归类
+    schedule: []
 ```
 
-录音进来时按起始时间自动匹配课程（默认 ±30 分钟容差）。匹配不上不会失败。
+几个容易踩的点：
 
-### 5. 跑第一节课
+- **课程代号**（`quantum_mechanics` 这层）是给程序用的内部标识，只能英文小写加
+  下划线；`name` 才是给人看的中文名。
+- 时间**必须带引号**写成 `"09:45"`，不带引号 YAML 会当成别的类型。
+- **`unknown` 那段不要删**，匹配不上课表的录音会落到它里面。
+- 匹配有 ±30 分钟容差（可在 `config.yaml` 的 `course.match_tolerance_minutes` 调）。
+  匹配不上不会失败，只是归到 `unknown`，事后可以
+  `python -m lecture_ai relabel <session_id>` 改正。
+- `glossary` 指向 `config\glossary\` 下的术语表文件。仓库自带几份理工科示例，
+  你也可以自己新建一个 txt（一行一个专业名词）。不需要就写 `glossary: ""`。
+
+改完再体检一次，确认没写坏：
 
 ```powershell
-# 把录音复制到 data/incoming/audio/，然后：
-python -m lecture_ai watch          # 长驻监听，发现新录音自动转录
-
-# 或者手动一步步来
-python -m lecture_ai scan           # 只建 session，不转录
-python -m lecture_ai process --all  # 转录
-python -m lecture_ai status         # 看进度
-python -m lecture_ai repair <session_id>   # 选择性重转录可疑片段
+python -m lecture_ai doctor
 ```
 
-产物在 `data/sessions/<session_id>/transcript/`。拿到 `transcript_repaired.md`
-之后，选一条出稿路线。
+看到 `[ OK ] courses.yaml` 就说明格式没问题。若报 `courses.yaml 解析失败`，
+八成是缩进用了 Tab 或者时间没加引号。
+
+### 7. 跑第一节课
+
+把录音文件（`.m4a` / `.mp3` / `.wav` 等）复制到项目里的
+`data\incoming\audio\` 文件夹。第 4 步跑过 `doctor` 之后这个文件夹就已经自动
+建好了，直接进去放文件即可。
+
+然后二选一：
+
+```powershell
+# 方式一：长驻监听，放进去就自动处理（推荐日常用）
+python -m lecture_ai watch
+
+# 方式二：手动一步步来，方便看清每步在干什么
+python -m lecture_ai scan            # 只扫描建档，不转录
+python -m lecture_ai status          # 看有哪些课、各自到哪一步了
+python -m lecture_ai process --all   # 开始转录（慢，可以挂着）
+python -m lecture_ai repair <session_id>   # 对可疑片段做选择性重转录
+```
+
+`<session_id>` 从 `status` 的输出里复制，形如
+`2026-09-03_1554_digital-electronics_002`。
+
+转录产物在 `data\sessions\<session_id>\transcript\`：
+
+- `transcript_raw.md` —— 原始转录
+- `transcript_repaired.md` —— **修复后的正式转录，后面出稿只认这一份**
+
+拿到 `transcript_repaired.md` 之后，选一条出稿路线（下一节）。
 
 ---
 
