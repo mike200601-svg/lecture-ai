@@ -166,15 +166,25 @@ python -m lecture_ai doctor
 `doctor` 会检查 ffmpeg、模型完整性（`model.bin` / `config.json` / `tokenizer.json` /
 `vocabulary.txt`）、并**实际初始化一次模型**，然后报 READY / PARTIAL / MISSING。
 
-推荐把 faster-whisper `medium` 手动下载到 `models/faster-whisper-medium`，用本地目录
-避免运行时联网。`models/` 已被 gitignore，权重不进 Git。
+**默认开箱可用**：示例配置里填的是 HuggingFace 模型名，首次转录时会自动把权重
+下载到 `data/cache/models`（需联网，medium 约 1.5 GB）。
 
 ```yaml
 transcription:
   local_whisper:
-    model: models/faster-whisper-medium   # 相对路径按项目根解析
+    model: medium        # HF 模型名，自动下载
     device: cpu
     compute_type: int8
+```
+
+`doctor` 在权重还没缓存时会报一条 FAIL —— 那是**正常的初始状态**，第一次转录跑完
+就变 OK；只是它没法替你判断你是否打算联网，所以宁可报出来。
+
+**想离线跑或预先下载**：把权重放进 `models/faster-whisper-medium/`，再把 `model`
+改成相对路径。相对路径按项目根解析，`models/` 已被 gitignore，权重不进 Git。
+
+```yaml
+    model: models/faster-whisper-medium
 ```
 
 有 NVIDIA 显卡时只改配置，代码不动：

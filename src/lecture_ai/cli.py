@@ -173,6 +173,25 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     ok = False  # 当前配置的模型不可用会直接阻塞真实转录
                 else:
                     ok = None
+                if ok is False:
+                    # doctor 承诺每一项都给修复建议；这是新用户唯一会看到的 FAIL，
+                    # 不给下一步等于把人卡在这里。三种成因给三种提示 —— 尤其不能对
+                    # 「配置指向一个不存在的本地目录」说「会自动从 HuggingFace 下载」，
+                    # 那种字符串不是合法仓库名，下载一定失败。
+                    looks_like_path = any(sep in str(model) for sep in ("/", "\\"))
+                    if cached.source == "local":
+                        detail += " · 修复：本地模型目录不完整，按 README「模型准备」补齐权重文件"
+                    elif looks_like_path:
+                        detail += (
+                            f" · 修复：config 里的 transcription.local_whisper.model 指向"
+                            f" `{model}`，但该目录不存在。要么把权重放到那里，"
+                            "要么改成 HuggingFace 模型名（如 `medium`）让它自动下载"
+                        )
+                    else:
+                        detail += (
+                            " · 修复：尚未缓存。首次转录会自动从 HuggingFace 下载到"
+                            " data/cache/models（需联网）；想预先下载见 README「模型准备」"
+                        )
                 display = cached.path.name if cached.source == "local" else model
                 report(f"模型 {display}", ok, detail)
         except ImportError:
@@ -194,10 +213,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         report("CUDA", None, "无法检测（ctranslate2 未安装）")
 
     # 配置文件
-    report("config.yaml", config.config_path is not None,
+    # 缺配置是**全新 clone 的正常初始状态**，不是故障：两个 yaml 都缺失时程序照样
+    # 跑（走内置默认值、课程归 unknown）。所以报 WARN 而不是 FAIL —— 否则新用户
+    # 第一次 doctor 就看到两条红色，会以为装坏了。
+    report("config.yaml", True if config.config_path else None,
            str(config.config_path) if config.config_path
            else "未找到，正在使用内置默认值；复制 config/config.example.yaml 为 config/config.yaml 即可自定义")
-    report("courses.yaml", config.courses_path.exists(),
+    report("courses.yaml", True if config.courses_path.exists() else None,
            str(config.courses_path) if config.courses_path.exists()
            else "未找到，所有录音将归入 unknown；复制 config/courses.example.yaml 为 config/courses.yaml 并填上真实课表")
 

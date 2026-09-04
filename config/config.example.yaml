@@ -29,9 +29,11 @@ transcription:
 
   local_whisper:
     # 默认按「无 CUDA 的笔记本」配置：CPU + int8。
-    # 把 medium 手动下载到项目 models/ 下，可避免运行时联网（见 README「模型准备」）。
+    # 这里填 HuggingFace 模型名，首次转录会自动下载到 data/cache/models，开箱可用。
+    # 想离线跑 / 预先下载：把权重放进 models/faster-whisper-medium/，
+    #   再把下面改成 model: models/faster-whisper-medium（相对项目根，见 README「模型准备」）。
     # 有 NVIDIA 显卡时改为：model: large-v3 / device: cuda / compute_type: float16
-    model: models/faster-whisper-medium
+    model: medium
     device: cpu                             # cpu | cuda | auto
     compute_type: int8                      # int8 | int8_float16 | float16 | float32
     cpu_threads: 0                          # 0 = 自动（取物理核心数）
