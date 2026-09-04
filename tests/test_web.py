@@ -180,15 +180,38 @@ def test_webui_does_not_bypass_idempotence(server, config, db):
 
 
 def test_oversized_body_is_rejected(server):
+    """必须回 413 且客户端读得到。
+
+    曾经的 bug：服务端不读 body 就直接回 400 并关连接，客户端还在写请求体，
+    于是撞上连接重置（Windows: WinError 10053），根本看不到状态码。
+    修法是拒绝前先排空 body，并显式 Connection: close。
+    """
     req = urllib.request.Request(
         server + "/api/key",
-        data=json.dumps({"api_key": "x" * 70000}).encode("utf-8"),
+        data=json.dumps({"api_key": "x" * 200_000}).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     with pytest.raises(urllib.error.HTTPError) as exc:
         urllib.request.urlopen(req, timeout=10)
-    assert exc.value.code == 400
+    assert exc.value.code == 413
+    assert "请求体过大" in json.loads(exc.value.read().decode("utf-8"))["error"]
+
+
+def test_server_survives_oversized_body_and_still_serves(server):
+    """拒绝之后连接状态必须是干净的 —— 下一个请求要能正常处理。"""
+    req = urllib.request.Request(
+        server + "/api/key",
+        data=b'{"api_key":"' + b"x" * 100_000 + b'"}',
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError):
+        urllib.request.urlopen(req, timeout=10)
+
+    status, payload = get(server, "/api/runtime")
+    assert status == 200
+    assert payload["api_key_set"] is False        # 超大请求没有污染状态
 
 
 # ----------------------------------------------------------------- 绑定地址

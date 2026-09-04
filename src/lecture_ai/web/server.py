@@ -42,6 +42,20 @@ log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
 
+#: 面板不接收大 body。设置令牌、force 标志，几十字节就够了。
+MAX_BODY_BYTES = 64 * 1024
+#: 拒绝过大 body 前礼貌排空的上限；再大就直接断，不陪着读完。
+DRAIN_CAP_BYTES = 4 * 1024 * 1024
+HTTP_CONTENT_TOO_LARGE = 413
+
+
+class BodyTooLarge(ValueError):
+    """请求体超过 MAX_BODY_BYTES。带上声明长度，供排空逻辑使用。"""
+
+    def __init__(self, length: int) -> None:
+        super().__init__(f"请求体过大：声明 {length} 字节，上限 {MAX_BODY_BYTES}")
+        self.length = length
+
 
 @dataclass
 class KeyStore:
@@ -184,30 +198,48 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         log.debug("web %s - %s", self.address_string(), fmt % args)
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, *, close: bool = False) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # 面板不该被任何页面跨源读取，也不该被缓存住旧状态。
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if close:
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _json(self, payload, status: int = HTTPStatus.OK) -> None:
+    def _json(self, payload, status: int = HTTPStatus.OK, *, close: bool = False) -> None:
         body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
-        self._send(status, body, "application/json; charset=utf-8")
+        self._send(status, body, "application/json; charset=utf-8", close=close)
 
-    def _error(self, status: int, message: str) -> None:
-        self._json({"error": message}, status)
+    def _error(self, status: int, message: str, *, close: bool = False) -> None:
+        self._json({"error": message}, status, close=close)
+
+    def _drain_body(self, length: int) -> None:
+        """在拒绝一个过大的请求体之前，先把它从连接上读掉。
+
+        不读就直接回响应再关连接的话，客户端往往还在写请求体，
+        它会先撞上连接重置（Windows 上是 WinError 10053），
+        **根本读不到我们回的状态码** —— 服务端明明回了 413，
+        客户端看到的却是"连接被中止"。
+        """
+        remaining = min(length, DRAIN_CAP_BYTES)
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 64 * 1024))
+            if not chunk:
+                break
+            remaining -= len(chunk)
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
             return {}
-        if length > 64 * 1024:  # 面板不接收大 body
-            raise ValueError("请求体过大")
+        if length > MAX_BODY_BYTES:
+            raise BodyTooLarge(length)
         raw = self.rfile.read(length)
         data = json.loads(raw.decode("utf-8"))
         if not isinstance(data, dict):
@@ -265,6 +297,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(self.state.build_package(session_id))
             else:
                 self._error(HTTPStatus.NOT_FOUND, f"未知路径：{path}")
+        except BodyTooLarge as exc:
+            # 先排空再回复，否则客户端读到的是连接重置而不是 413。
+            self._drain_body(exc.length)
+            self._error(HTTP_CONTENT_TOO_LARGE, str(exc), close=True)
         except ValueError as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
         except LectureAIError as exc:
