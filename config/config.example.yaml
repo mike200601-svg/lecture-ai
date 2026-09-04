@@ -12,7 +12,11 @@ paths:
   incoming_audio: data/incoming/audio
   incoming_images: data/incoming/images     # Phase 3 才会用
   web_exchange: data/web_exchange           # 与手机双向同步：GPT 批处理包往返
-  # 日常 GPT 网页投喂包。每节课及包内文件均带日期、时间和课程名。
+  # 日常 GPT 网页投喂包的存放目录。每节课一个子目录，目录名和包内文件名都带
+  # 日期、时间和课程名。命令跑完会把完整路径打印出来。
+  #   · 下面这个是相对路径，相对项目根目录，即 <项目目录>/exports/gpt_web
+  #   · 想放别处就写绝对路径，注意加引号，例如：
+  #       export_dir: "C:/Users/你的用户名/Desktop/GPT网页版待处理"
   # 若你把某个目录设成了 Obsidian Vault，务必把本目录放在 Vault 之外：
   # 投喂包里的转录/提示词/包说明都是 .md，会被 Obsidian 当成笔记，淹没真正的成稿。
   export_dir: exports/gpt_web

@@ -480,9 +480,46 @@ python -m lecture_ai export-package <session_id>
 python -m lecture_ai export-package <session_id> --board <照片或目录> --slides <课件或目录>
 ```
 
-在 `paths.export_dir` 下生成一个目录，含 REPAIRED 转录、板书、课件、投喂提示词和
-manifest（记录每个输入文件的 SHA-256）。把整个目录传给固定的网页会话，把输出按
-提示保存为 `..._final_note.md`。
+#### 投喂包生成在哪
+
+**默认生成在项目里的 `exports\gpt_web\` 下**，每节课一个子目录：
+
+```text
+<项目目录>\exports\gpt_web\2026-09-03_1554_数字电子技术基础_002\
+  2026-09-03_1554_数字电子技术基础_002_01_transcript_repaired.md   ← 转录正文
+  2026-09-03_1554_数字电子技术基础_002_NOTE_PROMPT.md              ← 给 GPT 的提示词
+  2026-09-03_1554_数字电子技术基础_002_session_info.md             ← 这节课的说明
+  2026-09-03_1554_数字电子技术基础_002_manifest.json               ← 每个输入文件的 SHA-256
+  02_board\        ← 板书照片（用 --board 传进来的）
+  03_slides\       ← 课件（用 --slides 传进来的）
+```
+
+命令跑完会直接把完整路径打印出来，照着去找就行：
+
+```
+GPT Web 投喂包已生成：
+  输出目录  D:\lecture-ai\exports\gpt_web\2026-09-03_1554_数字电子技术基础_002
+```
+
+**想换到别的地方**（比如放桌面方便拖进浏览器），改 `config\config.yaml` 里
+`paths:` 下面的 `export_dir` 那一行：
+
+```yaml
+paths:
+  # ……上面还有几行，不用动
+  export_dir: exports/gpt_web        # ← 改这一行
+```
+
+写相对路径就是相对项目目录；也可以写绝对路径，例如：
+
+```yaml
+  export_dir: "C:/Users/你的用户名/Desktop/GPT网页版待处理"
+```
+
+绝对路径**要加引号**，斜杠用 `/` 或 `\\` 都行。
+
+用法：把整个子目录里的文件一起传给固定的网页会话，再把网页产出按提示保存成
+`..._final_note.md`。
 
 归属规则很严：session 的 `images/` 与 `slides/` 视为已明确归属，其他位置的材料
 **必须**用 `--board` / `--slides` 显式指定。`data/incoming/images/` 里无法归属的照片
@@ -569,8 +606,13 @@ Obsidian 的"库"就是一个普通文件夹，把 Markdown 放进去就算入�
 2. 用 Obsidian 打开那个目录的上层文件夹（"打开文件夹作为库"）；
 3. 笔记里写 `![[课件.pdf]]` 就能把 PDF 直接嵌进正文显示。
 
-**注意把 `paths.export_dir` 配在库外面。** 投喂包里的转录、提示词、包说明都是
-`.md`，进了库会被当成笔记，把真正的成稿淹掉。
+**注意：投喂包目录不要放进 Obsidian 库里面。** 投喂包里的转录、提示词、包说明
+都是 `.md`，进了库会被 Obsidian 当成笔记——一节课的原始转录动辄八万字，会把
+你真正的成稿淹掉。
+
+默认值 `exports/gpt_web` 在项目目录内，只要你的 Obsidian 库不是这个项目就没事。
+如果你把 `export_dir`（见上文「投喂包生成在哪」）改成了库里的某个路径，
+挪出来，或者在 Obsidian 里把它加进「设置 → 文件与链接 → 排除的文件」。
 
 程序化入库（`vault-import` / `vault-status`）的设计见
 [docs/DESIGN_OBSIDIAN.md](docs/DESIGN_OBSIDIAN.md)，**当前未实现** —— 先用几周
