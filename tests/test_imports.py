@@ -13,6 +13,7 @@ import sys
 
 import pytest
 
+#: 每个顶层子包都要在这里列出。漏一个就等于那个包的循环 import 没人看着。
 MODULES = [
     "lecture_ai",
     "lecture_ai.cli",
@@ -20,17 +21,37 @@ MODULES = [
     "lecture_ai.errors",
     "lecture_ai.logging_setup",
     "lecture_ai.audio",
+    "lecture_ai.audio_draft",
+    "lecture_ai.cleaning",
     "lecture_ai.database",
+    "lecture_ai.export_package",
     "lecture_ai.fusion",
     "lecture_ai.image_processing",
     "lecture_ai.ingestion",
+    "lecture_ai.knowledge",
     "lecture_ai.llm",
+    "lecture_ai.note",
     "lecture_ai.obsidian",
     "lecture_ai.pipeline",
+    "lecture_ai.repair",
     "lecture_ai.session",
+    "lecture_ai.structure",
     "lecture_ai.transcription",
     "lecture_ai.utils",
+    "lecture_ai.web",
 ]
+
+
+def test_module_list_covers_every_subpackage():
+    """防止以后新增子包却忘了加进 MODULES —— 这个测试自己看着自己。"""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "lecture_ai"
+    packages = {
+        f"lecture_ai.{p.name}" for p in root.iterdir()
+        if p.is_dir() and (p / "__init__.py").is_file() and not p.name.startswith("_")
+    }
+    assert packages - set(MODULES) == set(), "有子包没有加进 MODULES"
 
 
 @pytest.mark.parametrize("module", MODULES)
