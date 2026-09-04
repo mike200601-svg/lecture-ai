@@ -1,7 +1,7 @@
 # TODO_PHASE1 —— Phase 1 细粒度任务拆解
 
 > **Historical Snapshot。** Phase 1 已通过真实课堂验收；当前状态与路线只看
-> [STATUS.md](STATUS.md) 和 [ROADMAP.md](ROADMAP.md)。
+> [STATUS.md](STATUS.md) 和 [ROADMAP.md](../ROADMAP.md)。
 
 > 目标：**用真实课堂录音稳定完成 `Audio → Session → ASR → Timestamp Transcript`**
 > 在这条链路稳定之前，不碰板书识别、不碰 Obsidian、不碰知识图谱。

@@ -1,7 +1,7 @@
 # 设计：Obsidian 对接（远期）
 
 > 状态：**设计，未实现**。远期任务，排在 Session Export Package 之后。
-> 上位文件：[ROADMAP.md](ROADMAP.md)
+> 上位文件：[ROADMAP.md](../ROADMAP.md)
 
 ## 1. 你手上实际有三类材料
 

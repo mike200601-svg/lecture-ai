@@ -1,6 +1,6 @@
 # Session Export Package · v1.0 实现约定
 
-> 状态：**IMPLEMENTED**。当前路线以 [ROADMAP.md](ROADMAP.md) 为唯一权威。
+> 状态：**IMPLEMENTED**。当前路线以 [ROADMAP.md](../ROADMAP.md) 为唯一权威。
 
 ## 目标
 
@@ -69,4 +69,5 @@ python -m lecture_ai export-package <session_id> --board <照片...> --slides <�
 python -m lecture_ai export-package <session_id> --dry-run
 ```
 
-现有 `lecture-ai export` 仍是 Phase 4 Obsidian 占位命令，两者语义不混用。
+原先的 `lecture-ai export` 占位命令已移除（只打印「未实现」，却与 `export-package` 名字相撞）。
+Obsidian 入库将来是独立的 `vault-import` / `vault-status`，见 `DESIGN_OBSIDIAN.md`，两者语义不混用。

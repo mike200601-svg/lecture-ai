@@ -4,7 +4,7 @@
 
 # CURRENT STATUS
 
-> **当前路线权威是 [ROADMAP.md](ROADMAP.md)。** 默认生产路线已改为 Direct GPT Web，
+> **当前路线权威是 [ROADMAP.md](../ROADMAP.md)。** 默认生产路线已改为 Direct GPT Web，
 > 完整 Phase 2 只保留为 High Integrity / Audit Mode。
 
 - **Phase 1 / 1.5：PASS / Production Verified**，连续真实课堂 3/3，包含口音和
@@ -43,7 +43,7 @@ REPAIRED → CLEANED → OUTLINE → KNOWLEDGE → AUDIO DRAFT
 # HISTORICAL SNAPSHOT · v1.0 收口前
 
 > 以下内容保留当时的验收证据；其中“待裁决”“本轮不修”“当前待办”等表述已失效，
-> 不得覆盖上方 CURRENT STATUS 或 [ROADMAP.md](ROADMAP.md)。
+> 不得覆盖上方 CURRENT STATUS 或 [ROADMAP.md](../ROADMAP.md)。
 
 - **Phase 2 Technical QA：PASS**（2026-09-03 复核：295 passed / 0 failed，
   provenance 链 SHA 全匹配，2B/2C/2D prompt fingerprint 全部与仓库当前版本一致）。

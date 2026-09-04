@@ -5,8 +5,9 @@
 
 ## 0. 这一版路线是被数据推翻后重写的
 
-2026-09-03 做完 Gold Session 的 A/B 产品级对照（见
-`data/sessions/<session>/comparison/AB_EVALUATION.md`）。同模型（gpt-5.6-sol）、
+2026-09-03 做完 Gold Session 的 A/B 产品级对照（脱敏公开版见
+[docs/AB_EVALUATION.md](docs/AB_EVALUATION.md)，含真实课堂内容的原始报告留在本机
+`data/sessions/<session>/comparison/AB_EVALUATION.md`，不进版本库）。同模型（gpt-5.6-sol）、
 同音频、同起点，唯一变量是流水线，结论是：
 
 - **B 组（REPAIRED 直接交 GPT 网页，1 轮）没有丢失 A 组抽取到的任何一条知识项**
@@ -111,7 +112,7 @@ A/B 对照的基准。不因后续改动重跑或覆盖。
   `lecture-ai export-package <session_id>` 把正式 REPAIRED、已明确归属的板书与
   明确提供的课件复制成 GPT Web 投喂包。
 - 正式输出目录为
-  `<paths.export_dir>/`；每节课目录与
+  `paths.export_dir`（见 config.example.yaml）；每节课目录与
   包内文件统一带日期、开始时间、课程名和序号。
 - REPAIRED 缺失会硬失败；不回退 RAW。不做 OCR / EXIF / 图片识别 / 自动上传。
 - Session `images/`、`slides/` 和 CLI 显式路径才算已归属；其余板书候选只列

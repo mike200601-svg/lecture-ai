@@ -1,7 +1,7 @@
 # 课堂自动笔记项目阶段进度汇报
 
 > **Historical Snapshot（2026-09-02）。** 本文只记录当日截面，不是当前路线或待办；
-> 当前权威见 [ROADMAP.md](ROADMAP.md) 与 [STATUS.md](STATUS.md)。
+> 当前权威见 [ROADMAP.md](../ROADMAP.md) 与 [STATUS.md](STATUS.md)。
 
 > 日期：2026-09-02  
 > 当前主线：Phase 2A Transcript Cleaning  

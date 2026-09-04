@@ -10,7 +10,7 @@
 
 运行 `lecture-ai watch` 接收并转录录音，确认本节课材料归属后运行
 `lecture-ai export-package <session_id> [--board ...] [--slides ...]`，再把
-`<paths.export_dir>` 中对应目录上传到固定
+`paths.export_dir` 中对应目录上传到固定
 GPT 网页会话。最终初稿按包内提示保存为 `日期_时间_课程名_序号_final_note.md`。
 
 ## 刻意不做

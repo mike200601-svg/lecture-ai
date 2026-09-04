@@ -1,7 +1,7 @@
 # Phase 1.5 / Phase 2 TODO
 
 > **Historical Snapshot。** 本清单保留 Phase 2 建设过程；当前状态与后续方向只看
-> [ROADMAP.md](ROADMAP.md) 和 [STATUS.md](STATUS.md)。
+> [ROADMAP.md](../ROADMAP.md) 和 [STATUS.md](STATUS.md)。
 
 > 当前边界：**Phase 2A / 2B / 2C / 2D 已在 Gold Session 全链真实跑通并逐阶段通过 QA**。
 > 七个正式产物全部落盘。剩余唯一待办是用户人工比较 A/B 两份笔记。
