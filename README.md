@@ -1,5 +1,9 @@
 # lecture-ai · 课堂自动笔记
 
+[![CI](https://github.com/mike200601-svg/lecture-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/mike200601-svg/lecture-ai/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+
 把大学理工科课堂的录音，变成一份**不漏重点、可以反复看**的课堂笔记。
 
 录音在本机转录（不上传音频），可疑片段自动重转录，然后交给大模型整理成稿。
