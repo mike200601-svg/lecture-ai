@@ -5,15 +5,39 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lecture-ai"
 version = "1.0.0"
-description = "课堂自动笔记与 Obsidian 知识库系统"
+description = "课堂录音 → 本地转录 → 课堂笔记。Lecture recordings to reliable Markdown notes."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
+authors = [{ name = "mike200601-svg" }]
+keywords = ["whisper", "asr", "lecture-notes", "obsidian", "transcription", "faster-whisper"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Simplified)",
+    # 核心逻辑三平台都跑 CI；手机同步辅助脚本是 Windows 专用。
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Topic :: Text Processing :: Markup :: Markdown",
+]
 
 dependencies = [
     "PyYAML>=6.0",
     "python-dotenv>=1.0",
 ]
+
+[project.urls]
+# 建仓库时若用了别的名字，记得改这两行。
+Homepage = "https://github.com/mike200601-svg/lecture-ai"
+Repository = "https://github.com/mike200601-svg/lecture-ai"
 
 [project.optional-dependencies]
 # 本地 ASR。单独成组，未安装时其余功能与测试仍可运行。
@@ -42,7 +66,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-lecture_ai = ["database/*.sql"]
+lecture_ai = ["database/*.sql", "web/static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
