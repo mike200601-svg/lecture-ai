@@ -310,10 +310,46 @@ class Handler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
 
 
-def make_server(config: Config, host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
-    """构造但不启动服务器。port=0 时由系统分配（测试用）。"""
+#: 默认端口。**不要用 8765** —— 百度输入法会监听 0.0.0.0:8765，而它在中文
+#: Windows 上极其常见，正好是本项目的主要用户群。撞上时 Windows 报的是
+#: WinError 10013（access forbidden）而不是 10048（already in use），
+#: 因为对方绑的是通配地址，错误信息会把人误导到防火墙方向去。
+DEFAULT_PORT = 8477
+
+
+def make_server(
+    config: Config, host: str = "127.0.0.1", port: int = DEFAULT_PORT
+) -> ThreadingHTTPServer:
+    """构造但不启动服务器。port=0 时由系统分配（测试用）。
+
+    端口不可用时抛 OSError，由调用方翻译成人话 —— 见 :func:`bind_error_advice`。
+    """
     state = AppState(config)
     return ThreadingHTTPServer((host, port), partial(Handler, state=state))
+
+
+def bind_error_advice(host: str, port: int, exc: OSError) -> list[str]:
+    """把 socket 绑定失败翻译成可执行的建议。
+
+    独立成函数是为了可测试，也为了不在 CLI 里堆一大段字符串。
+    """
+    lines = [
+        f"无法在 {host}:{port} 启动面板：{exc}",
+        "",
+        "常见原因与解法：",
+        "",
+        "1) 端口已被别的程序占用。Windows 上如果对方绑的是 0.0.0.0，",
+        "   报的会是 WinError 10013 而不是 10048，看着像权限问题其实不是。",
+        f"     换个端口：      python -m lecture_ai serve --port {port + 1}",
+        "     或让系统分配：  python -m lecture_ai serve --port 0",
+        "",
+        "2) 想知道是谁占了这个端口（PowerShell）：",
+        f"     Get-Process -Id (Get-NetTCPConnection -LocalPort {port}).OwningProcess",
+        "",
+        "3) Hyper-V / WSL 会预留大片端口段，落在里面也会绑定失败：",
+        "     netsh interface ipv4 show excludedportrange protocol=tcp",
+    ]
+    return lines
 
 
 def is_loopback(host: str) -> bool:

@@ -521,8 +521,23 @@ note:
 
 ```powershell
 python -m lecture_ai serve
-# 浏览器打开 http://127.0.0.1:8765
+# 浏览器打开 http://127.0.0.1:8477
 ```
+
+**启动报端口错误怎么办**（Windows 上比较常见）：
+
+```powershell
+python -m lecture_ai serve --port 0        # 让系统随机挑一个空闲端口，最省事
+python -m lecture_ai serve --port 8899     # 或者自己指定
+```
+
+Windows 上如果占用端口的程序绑的是 `0.0.0.0`，报的会是
+`WinError 10013 (access forbidden)` 而不是 `10048 (already in use)` ——
+看着像权限或防火墙问题，其实只是端口冲突。程序会直接给出上面这两条建议，
+以及查"是谁占了这个端口"的命令。
+
+> 顺便说一句：默认端口刻意避开了 8765 —— **百度输入法**会监听
+> `0.0.0.0:8765`，而它在中文 Windows 上非常普遍。
 
 **不需要额外安装任何东西** —— 用标准库 `http.server` 实现，不引入 Web 框架依赖。
 

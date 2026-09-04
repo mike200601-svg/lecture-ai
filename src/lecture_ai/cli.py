@@ -773,10 +773,16 @@ def cmd_reindex(args: argparse.Namespace) -> int:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     """启动本地 WebUI 面板。零额外依赖，默认只绑本机。"""
-    from lecture_ai.web import is_loopback, make_server
+    from lecture_ai.web import bind_error_advice, is_loopback, make_server
 
     config = _bootstrap(args)
-    server = make_server(config, args.host, args.port)
+    try:
+        server = make_server(config, args.host, args.port)
+    except OSError as exc:
+        # 端口冲突是最常见的启动失败，不该丢一整页 traceback 给用户。
+        for line in bind_error_advice(args.host, args.port, exc):
+            out(line)
+        return EXIT_FAILURE
     port = server.server_address[1]
     out(f"lecture-ai 面板  http://{args.host}:{port}")
     out(f"  provider      {config.llm.provider} / {config.llm.model}")
@@ -1012,7 +1018,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--host", default="127.0.0.1",
         help="默认只绑本机。改成 0.0.0.0 会暴露到局域网，而面板没有认证",
     )
-    p_serve.add_argument("--port", type=int, default=8765, help="默认 8765；0 表示由系统分配")
+    p_serve.add_argument(
+        "--port", type=int, default=8477,
+        help="默认 8477；0 表示由系统随机分配（端口被占时最省事的办法）",
+    )
     p_serve.set_defaults(func=cmd_serve)
 
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")

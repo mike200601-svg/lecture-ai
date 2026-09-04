@@ -17,7 +17,14 @@ from pathlib import Path
 import pytest
 
 from lecture_ai.session import SessionManager, load_courses
-from lecture_ai.web import AppState, KeyStore, is_loopback, make_server
+from lecture_ai.web import (
+    DEFAULT_PORT,
+    AppState,
+    KeyStore,
+    bind_error_advice,
+    is_loopback,
+    make_server,
+)
 
 START = datetime(2026, 9, 3, 14, 0)
 SECRET = "sk-test-do-not-leak-0123456789"
@@ -223,3 +230,44 @@ def test_server_survives_oversized_body_and_still_serves(server):
 ])
 def test_is_loopback(host, expected):
     assert is_loopback(host) is expected
+
+
+# ----------------------------------------------------------------- 端口冲突
+
+
+def test_default_port_is_not_8765():
+    """8765 被百度输入法占用（0.0.0.0），在中文 Windows 上极常见。
+
+    对方绑通配地址时 Windows 报 WinError 10013 而不是 10048，
+    错误信息会把人误导到防火墙方向，所以默认端口必须避开它。
+    """
+    assert DEFAULT_PORT != 8765
+
+
+def test_bind_error_advice_is_actionable():
+    """端口冲突不该只丢一个 traceback，得给出能直接照做的命令。"""
+    exc = OSError("[WinError 10013] An attempt was made to access a socket ...")
+    lines = bind_error_advice("127.0.0.1", 8477, exc)
+    text = "\n".join(lines)
+
+    assert "127.0.0.1:8477" in text
+    assert str(exc) in text
+    assert "--port 8478" in text          # 建议换的下一个端口
+    assert "--port 0" in text             # 让系统分配
+    assert "Get-NetTCPConnection" in text  # 怎么查是谁占的
+    assert "excludedportrange" in text     # Hyper-V/WSL 预留段
+
+
+def test_bind_failure_surfaces_as_oserror(config):
+    """make_server 在端口不可用时抛 OSError，交给调用方翻译。"""
+    import socket
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    taken = holder.getsockname()[1]
+    try:
+        with pytest.raises(OSError):
+            make_server(config, "127.0.0.1", taken)
+    finally:
+        holder.close()
