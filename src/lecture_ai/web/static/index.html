@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lecture-ai 面板</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --panel: #fff; --line: #e3e3e0; --text: #1c1c1a;
+    --muted: #6b6b66; --accent: #2f6f4f; --warn: #8a5a1a; --err: #a33;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #191918; --panel: #212120; --line: #34342f; --text: #e8e8e4;
+      --muted: #9a9a92; --accent: #6fbf90; --warn: #d9a24a; --err: #e08585;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.6 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  h1 { font-size: 16px; margin: 0 auto 0 0; font-weight: 650; }
+  h1 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  main { padding: 20px; display: grid; gap: 20px; grid-template-columns: minmax(0,3fr) minmax(0,2fr); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  section > h2 {
+    font-size: 13px; margin: 0; padding: 10px 14px; color: var(--muted);
+    border-bottom: 1px solid var(--line); font-weight: 600; letter-spacing: .02em;
+  }
+  .body { padding: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  code, pre { font-family: ui-monospace, Consolas, "Cascadia Mono", monospace; }
+  pre {
+    margin: 0; padding: 12px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; max-height: 420px; overflow: auto; white-space: pre-wrap;
+    word-break: break-word; font-size: 12px;
+  }
+  button {
+    font: inherit; padding: 6px 12px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input[type=password], input[type=text] {
+    font: inherit; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); min-width: 200px;
+  }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.on { color: var(--accent); border-color: currentColor; }
+  .pill.off { color: var(--muted); }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .muted { color: var(--muted); }
+  .warn { color: var(--warn); }
+  .err { color: var(--err); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0 0 14px; }
+  dt { color: var(--muted); font-size: 12px; }
+  dd { margin: 0; }
+  #msg:empty { display: none; }
+  #msg { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>lecture-ai <small id="runtime">加载中…</small></h1>
+  <div class="row" id="keybox" hidden>
+    <span id="keystate" class="pill off">令牌未设置</span>
+    <input type="password" id="key" placeholder="OPENAI_API_KEY" autocomplete="off" spellcheck="false">
+    <button id="savekey">存入内存</button>
+  </div>
+  <button id="reload">刷新</button>
+</header>
+
+<div id="msg"></div>
+
+<main>
+  <section>
+    <h2>课堂列表</h2>
+    <table>
+      <thead><tr><th>日期</th><th>课程</th><th>时长</th><th>REPAIRED</th><th>成稿</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>详情</h2>
+    <div class="body" id="detail"><p class="muted">在左侧选一节课。</p></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+const $ = (id) => document.getElementById(id);
+let selected = null;
+let runtime = {};
+
+function msg(text, cls) {
+  const el = $("msg");
+  el.textContent = text || "";
+  el.className = cls || "";
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({ error: "响应不是合法 JSON" }));
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function minutes(sec) {
+  return sec ? (sec / 60).toFixed(0) + " 分钟" : "—";
+}
+
+function tick(ok) {
+  return ok ? '<span class="pill on">有</span>' : '<span class="pill off">无</span>';
+}
+
+async function loadRuntime() {
+  runtime = await api("/api/runtime");
+  $("runtime").textContent = runtime.provider + " / " + runtime.model;
+  $("keybox").hidden = !runtime.needs_api_key;
+  const state = $("keystate");
+  state.textContent = runtime.api_key_set ? "令牌已在内存中" : "令牌未设置";
+  state.className = "pill " + (runtime.api_key_set ? "on" : "off");
+}
+
+async function loadSessions() {
+  const { sessions } = await api("/api/sessions");
+  const tbody = $("rows");
+  if (!sessions.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">还没有 session。先把录音放进 data/incoming/audio 并运行 watch。</td></tr>';
+    return;
+  }
+  tbody.innerHTML = "";
+  for (const s of sessions) {
+    const tr = document.createElement("tr");
+    tr.dataset.id = s.session_id;
+    if (s.error) {
+      tr.innerHTML = '<td colspan="5" class="err">' + s.session_id + " — " + s.error + "</td>";
+    } else {
+      tr.innerHTML =
+        "<td>" + (s.date || "—") + "</td>" +
+        "<td>" + (s.course || "—") + "</td>" +
+        "<td>" + minutes(s.duration_sec) + "</td>" +
+        "<td>" + tick(s.has_repaired) + "</td>" +
+        "<td>" + tick(s.has_note) + "</td>";
+      tr.onclick = () => select(s.session_id);
+    }
+    tbody.appendChild(tr);
+  }
+  markSelected();
+}
+
+function markSelected() {
+  for (const tr of $("rows").querySelectorAll("tr[data-id]")) {
+    tr.setAttribute("aria-selected", String(tr.dataset.id === selected));
+  }
+}
+
+async function select(id) {
+  selected = id;
+  markSelected();
+  msg("");
+  const box = $("detail");
+  box.innerHTML = '<p class="muted">读取中…</p>';
+  try {
+    const d = await api("/api/sessions/" + encodeURIComponent(id));
+    box.innerHTML =
+      "<dl>" +
+      "<dt>Session</dt><dd><code>" + d.session_id + "</code></dd>" +
+      "<dt>课程</dt><dd>" + (d.course || "—") + "</dd>" +
+      "<dt>状态</dt><dd>" + d.state + "</dd>" +
+      "<dt>转录长度</dt><dd>" + (d.transcript_chars ? d.transcript_chars.toLocaleString() + " 字符" : "无 REPAIRED") + "</dd>" +
+      "<dt>板书 / 课件</dt><dd>" + d.board_count + " / " + d.slide_count + "</dd>" +
+      "<dt>成稿</dt><dd>" + (d.has_note ? "<code>" + d.note_name + "</code>" : "未生成") + "</dd>" +
+      "</dl>" +
+      '<div class="row">' +
+      '<button class="primary" id="gen"' + (d.has_repaired ? "" : " disabled") + ">生成成稿（API）</button>" +
+      '<button id="pkg"' + (d.has_repaired ? "" : " disabled") + ">生成投喂包</button>" +
+      (d.has_note ? '<button id="view">查看成稿</button>' : "") +
+      "</div>" +
+      (d.board_count || d.slide_count
+        ? '<p class="warn">这节课有板书或课件。API 路线不发送图片，成稿不会包含它们 —— 需要的话用投喂包走网页会话。</p>'
+        : "") +
+      '<div id="preview" style="margin-top:14px"></div>';
+
+    $("gen").onclick = () => generate(d);
+    $("pkg").onclick = () => makePackage(d);
+    if (d.has_note) $("view").onclick = () => viewNote(d.session_id);
+  } catch (e) {
+    box.innerHTML = '<p class="err">' + e.message + "</p>";
+  }
+}
+
+async function generate(d) {
+  if (runtime.needs_api_key && !runtime.api_key_set) {
+    msg("请先在右上角填入 API 令牌。它只存在服务端内存里，不会落盘。", "warn");
+    return;
+  }
+  if (d.has_note && !confirm("成稿已存在，覆盖它？旧稿不会自动备份。")) return;
+  const btn = $("gen");
+  btn.disabled = true;
+  btn.textContent = "生成中，可能要一两分钟…";
+  msg("");
+  try {
+    const r = await api("/api/sessions/" + encodeURIComponent(d.session_id) + "/note", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: !!d.has_note }),
+    });
+    const u = r.usage || {};
+    msg("成稿已生成：" + r.note_name + "（" + r.model + "，入 " +
+        (u.input_tokens || 0) + " / 出 " + (u.output_tokens || 0) + " token）", "");
+    await loadSessions();
+    await select(d.session_id);
+    viewNote(d.session_id);
+  } catch (e) {
+    msg(e.message, "err");
+    btn.disabled = false;
+    btn.textContent = "生成成稿（API）";
+  }
+}
+
+async function makePackage(d) {
+  const btn = $("pkg");
+  btn.disabled = true;
+  try {
+    const r = await api("/api/sessions/" + encodeURIComponent(d.session_id) + "/export-package", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    msg("投喂包已生成：" + r.output_dir + "（板书 " + r.board_count + " / 课件 " + r.slide_count + "）", "");
+  } catch (e) {
+    msg(e.message, "err");
+  }
+  btn.disabled = false;
+}
+
+async function viewNote(id) {
+  const box = $("preview");
+  if (!box) return;
+  box.innerHTML = '<p class="muted">读取中…</p>';
+  try {
+    const r = await api("/api/sessions/" + encodeURIComponent(id) + "/note");
+    const pre = document.createElement("pre");
+    pre.textContent = r.markdown;
+    box.innerHTML = "";
+    box.appendChild(pre);
+  } catch (e) {
+    box.innerHTML = '<p class="err">' + e.message + "</p>";
+  }
+}
+
+$("savekey").onclick = async () => {
+  const input = $("key");
+  try {
+    runtime = await api("/api/key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: input.value }),
+    });
+    input.value = "";                 // 不在页面上留存令牌
+    await loadRuntime();
+    msg("令牌已存入服务端内存。进程退出即失效，不会写进任何文件。", "");
+  } catch (e) {
+    msg(e.message, "err");
+  }
+};
+
+$("reload").onclick = async () => {
+  msg("");
+  await loadRuntime();
+  await loadSessions();
+  if (selected) await select(selected);
+};
+
+(async () => {
+  try {
+    await loadRuntime();
+    await loadSessions();
+  } catch (e) {
+    msg(e.message, "err");
+  }
+})();
+</script>
+</body>
+</html>

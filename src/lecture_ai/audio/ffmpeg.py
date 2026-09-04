@@ -25,7 +25,7 @@ _INSTALL_HINT = (
     "未找到 ffmpeg。任选一种方式安装：\n"
     "  1) winget install Gyan.FFmpeg            （推荐，装完重开终端）\n"
     "  2) pip install imageio-ffmpeg            （无需管理员权限，自带静态二进制）\n"
-    "  3) 在 config/config.yaml 里设置 audio.ffmpeg_path 指向 ffmpeg.exe"
+    "  3) 在 config/config.yaml 里设置 audio.ffmpeg_path 指向 ffmpeg 可执行文件"
 )
 
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d\d):(\d\d\.\d+)")

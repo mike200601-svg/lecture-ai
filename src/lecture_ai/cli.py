@@ -195,9 +195,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # 配置文件
     report("config.yaml", config.config_path is not None,
-           str(config.config_path or "未找到，正在使用内置默认值"))
+           str(config.config_path) if config.config_path
+           else "未找到，正在使用内置默认值；复制 config/config.example.yaml 为 config/config.yaml 即可自定义")
     report("courses.yaml", config.courses_path.exists(),
-           str(config.courses_path) if config.courses_path.exists() else "未找到，所有录音将归入 unknown")
+           str(config.courses_path) if config.courses_path.exists()
+           else "未找到，所有录音将归入 unknown；复制 config/courses.example.yaml 为 config/courses.yaml 并填上真实课表")
 
     glossary_files = (
         sorted(p.name for p in config.glossary_dir.glob("*.txt"))
@@ -747,11 +749,57 @@ def cmd_reindex(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def cmd_export(args: argparse.Namespace) -> int:
-    """Phase 4 才实现：导出到 Obsidian Vault。"""
-    out("export 属于 Phase 4（Obsidian 集成），当前尚未实现。")
-    out("Phase 1 的产物在：data/sessions/<session_id>/transcript/")
-    return EXIT_FAILURE
+def cmd_serve(args: argparse.Namespace) -> int:
+    """启动本地 WebUI 面板。零额外依赖，默认只绑本机。"""
+    from lecture_ai.web import is_loopback, make_server
+
+    config = _bootstrap(args)
+    server = make_server(config, args.host, args.port)
+    port = server.server_address[1]
+    out(f"lecture-ai 面板  http://{args.host}:{port}")
+    out(f"  provider      {config.llm.provider} / {config.llm.model}")
+    if not is_loopback(args.host):
+        out("  [警告]        面板没有任何认证，且能触发按 token 计费的 API 调用。")
+        out("                绑到非本机地址意味着同网段的人都能用你的令牌出稿。")
+    out("  Ctrl+C 停止")
+    # 服务器会一直跑；输出被重定向时 stdout 是块缓冲的，不 flush 的话
+    # 上面这几行（含访问地址）会一直卡在缓冲区里看不见。
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        out("")
+        out("已停止。内存中的 API 令牌随进程一并消失。")
+    finally:
+        server.server_close()
+    return EXIT_OK
+
+
+def cmd_note(args: argparse.Namespace) -> int:
+    """API 路线：把 REPAIRED 一次性整理成成稿笔记。"""
+    from lecture_ai.note import NoteBuilder
+
+    config = _bootstrap(args)
+    outcome = NoteBuilder(config).build(
+        args.session_id, force=args.force, dry_run=args.dry_run
+    )
+    out("成稿计划（未调用模型）：" if outcome.dry_run else "成稿已生成：")
+    out(f"  Session   {outcome.session_id}")
+    out(f"  REPAIRED  {outcome.transcript_source}")
+    out(f"  输出      {outcome.output_path}")
+    out(f"  提示词    {outcome.prompt_chars} 字符")
+    if not outcome.dry_run:
+        out(f"  模型      {outcome.provider}/{outcome.model}")
+        usage = outcome.usage
+        if usage:
+            out(
+                f"  token     入 {usage.get('input_tokens', 0)}"
+                f" / 出 {usage.get('output_tokens', 0)}"
+                f" / 共 {usage.get('total_tokens', 0)}"
+            )
+    for warning in outcome.warnings:
+        out(f"  [警告]    {warning}")
+    return EXIT_OK
 
 
 def cmd_export_package(args: argparse.Namespace) -> int:
@@ -796,7 +844,8 @@ def build_parser() -> argparse.ArgumentParser:
             "  lecture-ai status <session>    查看单个 session 详情\n"
             "  lecture-ai retry <session>     重试失败的 session\n"
             "  lecture-ai repair <session>    选择性重转录可疑区域\n"
-            "  lecture-ai export-package <session>  生成 GPT Web 投喂包\n"
+            "  lecture-ai export-package <session>  生成 GPT Web 投喂包（可带板书课件）\n"
+            "  lecture-ai note <session>      用 API 直接出成稿笔记（纯文本）\n"
             "  lecture-ai clean <session>     分块清洗修复后的转录\n"
         ),
     )
@@ -928,13 +977,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_export_package.add_argument("--dry-run", action="store_true", help="只显示计划，不写文件")
     p_export_package.set_defaults(func=cmd_export_package)
 
+    p_note = sub.add_parser(
+        "note", help="用 API 把 REPAIRED 一次性整理成成稿笔记（不发送图片）"
+    )
+    p_note.add_argument("session_id")
+    p_note.add_argument("--force", action="store_true", help="覆盖已存在的成稿（不自动备份）")
+    p_note.add_argument("--dry-run", action="store_true", help="只渲染提示词，不调用模型")
+    p_note.set_defaults(func=cmd_note)
+
+    p_serve = sub.add_parser("serve", help="启动本地 WebUI 面板（看状态、一键出稿）")
+    p_serve.add_argument(
+        "--host", default="127.0.0.1",
+        help="默认只绑本机。改成 0.0.0.0 会暴露到局域网，而面板没有认证",
+    )
+    p_serve.add_argument("--port", type=int, default=8765, help="默认 8765；0 表示由系统分配")
+    p_serve.set_defaults(func=cmd_serve)
+
     p_watch = sub.add_parser("watch", help="长驻监听 incoming 目录")
     p_watch.add_argument("--max-iterations", type=int, default=None,
                          help=argparse.SUPPRESS)  # 仅测试用
     p_watch.set_defaults(func=cmd_watch)
 
     sub.add_parser("reindex", help="从 metadata.json 重建数据库索引").set_defaults(func=cmd_reindex)
-    sub.add_parser("export", help="导出到 Obsidian（Phase 4）").set_defaults(func=cmd_export)
+    # Obsidian 入库命令（vault-import / vault-status）设计见 docs/DESIGN_OBSIDIAN.md，尚未实现。
+    # 原先的 `export` 占位命令已移除：它只打印「未实现」，却与 export-package 名字相撞。
 
     return parser
 

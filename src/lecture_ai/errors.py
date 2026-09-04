@@ -55,6 +55,10 @@ class ExportPackageError(LectureAIError):
     """GPT Web 投喂包无法安全生成。"""
 
 
+class NoteError(LectureAIError):
+    """API 路线的成稿生成失败：缺少 REPAIRED、provider 不适用或成稿已存在。"""
+
+
 class InvalidTransition(LectureAIError):
     """非法的状态迁移。属于程序 bug，不应在正常流程中出现。"""
 

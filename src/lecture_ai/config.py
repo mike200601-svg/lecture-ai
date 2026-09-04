@@ -153,6 +153,18 @@ class VisionConfig:
 
 
 @dataclass
+class NoteConfig:
+    """API 路线成稿（`lecture-ai note`）。
+
+    整篇课堂笔记动辄三五万字，输出上限必须比分块处理的其他步骤大得多 ——
+    沿用 llm.max_tokens（默认 8000）会让成稿被静默截断。
+    """
+
+    max_output_tokens: int = 32000
+    temperature: float = 0.3
+
+
+@dataclass
 class ObsidianConfig:
     create_concepts: bool = False
     concept_threshold: float = 0.8
@@ -186,6 +198,7 @@ class Config:
     course: CourseMatchConfig = field(default_factory=CourseMatchConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
+    note: NoteConfig = field(default_factory=NoteConfig)
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     privacy: PrivacyConfig = field(default_factory=PrivacyConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -346,6 +359,7 @@ def load_config(config_path: Path | None = None, project_root: Path | None = Non
         course=_dc(CourseMatchConfig, _sub(raw, "course")),
         llm=_dc(LLMConfig, _sub(raw, "llm")),
         vision=_dc(VisionConfig, _sub(raw, "vision")),
+        note=_dc(NoteConfig, _sub(raw, "note")),
         obsidian=_dc(ObsidianConfig, _sub(raw, "obsidian")),
         privacy=_dc(PrivacyConfig, _sub(raw, "privacy")),
         logging=_dc(LoggingConfig, _sub(raw, "logging")),
