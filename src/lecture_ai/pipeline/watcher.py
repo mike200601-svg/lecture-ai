@@ -18,6 +18,7 @@ from lecture_ai.config import Config
 from lecture_ai.cleaning.web_batch import CleanWebBatchService
 from lecture_ai.errors import LectureAIError
 from lecture_ai.logging_setup import get_logger
+from lecture_ai.pipeline.autopilot import AutopilotService
 from lecture_ai.pipeline.phase1 import Phase1Pipeline
 
 log = get_logger(__name__)
@@ -81,10 +82,12 @@ class Watcher:
         config: Config,
         pipeline: Phase1Pipeline | None = None,
         web_batches: CleanWebBatchService | None = None,
+        autopilot: AutopilotService | None = None,
     ) -> None:
         self.config = config
         self.pipeline = pipeline or Phase1Pipeline(config)
         self.web_batches = web_batches or CleanWebBatchService(config)
+        self.autopilot = autopilot or AutopilotService(config)
         self._stop = False
 
     def request_stop(self, *_args) -> None:
@@ -115,6 +118,14 @@ class Watcher:
                             log.info("✔ %s 处理完成（%s）", o.session_id, o.message)
                         else:
                             log.error("✘ %s 处理失败：%s", o.session_id, o.message)
+                    # Phase 1 收尾：自动补 repair 并出投喂包
+                    for step in self.autopilot.run_once():
+                        if step.ok:
+                            log.info("✔ %s %s", step.session_id, step.message)
+                            if step.output_dir:
+                                log.info("   投喂包目录：%s", step.output_dir)
+                        else:
+                            log.error("✘ %s %s", step.session_id, step.message)
                     for batch in self.web_batches.run_once():
                         log.info("GPT 网页批处理 · %s · %s", batch.session_id, batch.message)
                 except LectureAIError as exc:

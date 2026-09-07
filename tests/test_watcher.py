@@ -118,3 +118,39 @@ def test_watch_runs_web_batch_maintenance(config, pipeline):
     watcher = Watcher(config, pipeline, web_batches=batches)
     assert watcher.run(max_iterations=1) == 0
     assert batches.calls == 1
+
+
+def test_watch_runs_autopilot_each_round(config, pipeline):
+    """Phase 1 收尾自动化必须挂在主循环里，否则投喂包永远要手动生成。"""
+
+    class SpyAutopilot:
+        def __init__(self):
+            self.rounds = 0
+
+        def run_once(self):
+            self.rounds += 1
+            return []
+
+    spy = SpyAutopilot()
+    watcher = Watcher(config, pipeline, autopilot=spy)
+    watcher._sleep = lambda _s: None
+    assert watcher.run(max_iterations=2) == 0
+    assert spy.rounds == 2
+
+
+def test_watch_survives_autopilot_errors(config, pipeline):
+    """autopilot 抛错也不能让长驻服务退出。"""
+
+    class BoomAutopilot:
+        def __init__(self):
+            self.rounds = 0
+
+        def run_once(self):
+            self.rounds += 1
+            raise LectureAIError("模拟收尾自动化失败")
+
+    boom = BoomAutopilot()
+    watcher = Watcher(config, pipeline, autopilot=boom)
+    watcher._sleep = lambda _s: None
+    assert watcher.run(max_iterations=2) == 0
+    assert boom.rounds == 2

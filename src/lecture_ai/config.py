@@ -99,6 +99,10 @@ class ProcessingConfig:
     quiet_seconds: int = 10
     keep_incoming: bool = False
     min_audio_seconds: int = 60
+    # Phase 1 收尾自动化：转录完成后自动补 selective repair，再自动出投喂包。
+    # 关掉任意一个都会退回手动 `lecture-ai repair` / `export-package`。
+    auto_repair: bool = True
+    auto_export_package: bool = True
 
 
 @dataclass

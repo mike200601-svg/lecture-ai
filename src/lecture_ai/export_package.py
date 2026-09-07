@@ -173,6 +173,50 @@ class ExportPackageBuilder:
 
         return outcome
 
+    def needs_rebuild(self, session_id: str) -> tuple[bool, str]:
+        """投喂包是否需要（重新）生成。供 watch 自动化判断，避免每轮空转重打包。
+
+        比对 manifest 里记录的转录与素材指纹：课后补传板书、或 repair 重跑导致
+        转录变化，都会让指纹对不上，从而自动重建。返回 (是否需要, 原因)。
+        """
+        meta = self.sessions.load(session_id)
+        session_dir = self.sessions.session_dir(session_id)
+        transcript = session_dir / "transcript" / REPAIRED_MD
+        if not transcript.is_file():
+            return False, f"缺少正式 {REPAIRED_MD}"
+
+        prefix = self._identity_prefix(meta)
+        manifest_path = self._safe_destination(prefix) / self._package_names(prefix)["manifest"]
+        if not manifest_path.is_file():
+            return True, "尚未生成投喂包"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return True, "manifest 损坏"
+
+        if manifest.get("transcript", {}).get("sha256") != sha256_file(transcript):
+            return True, "REPAIRED 转录已更新"
+
+        board, _ = self._board_sources(meta, session_dir, ())
+        slides = self._material_sources(
+            [session_dir / "slides"], (), SLIDE_EXTENSIONS, "课件"
+        )
+        # manifest 存的是复制后文件的 sha；copy2 不改内容，与源文件一致。
+        current = {
+            (rel_to(path, self.config.paths.project_root), sha256_file(path))
+            for path in (*board, *slides)
+        }
+        recorded = {
+            (str(record.get("source_path")), str(record.get("sha256")))
+            for record in (
+                *manifest.get("board_files", []),
+                *manifest.get("slide_files", []),
+            )
+        }
+        if current != recorded:
+            return True, "板书/课件有变化"
+        return False, "已是最新"
+
     @staticmethod
     def _identity_prefix(meta: SessionMeta) -> str:
         # 命名规则由 utils.naming 独占，API 路线（lecture-ai note）复用同一份。

@@ -76,6 +76,8 @@ processing:
   quiet_seconds: 10                         # 距最后修改至少多少秒
   keep_incoming: true                       # Syncthing 接收目录必须保留源文件，避免移动后被重复下载
   min_audio_seconds: 60                     # 短于此时长的音频不建 session（防误触录音）
+  auto_repair: true                         # 转录完成后自动跑 selective repair
+  auto_export_package: true                 # 有 REPAIRED 后自动生成 GPT Web 投喂包
 
 # ---------------------------------------------------------------- Phase 1.5 选择性重转录
 repair:

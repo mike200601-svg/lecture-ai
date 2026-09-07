@@ -1,5 +1,6 @@
 """Pipeline：按 Session 状态机编排各处理步骤，以及长驻的 watch 服务。"""
 
+from lecture_ai.pipeline.autopilot import AutopilotOutcome, AutopilotService
 from lecture_ai.pipeline.diagnostics import AudioProbeReport, probe_audio_metadata
 from lecture_ai.pipeline.phase1 import Phase1Pipeline, ProcessOutcome
 from lecture_ai.pipeline.watcher import Watcher
@@ -10,6 +11,8 @@ from lecture_ai.knowledge.pipeline import KnowledgePipeline
 from lecture_ai.audio_draft.pipeline import AudioDraftPipeline
 
 __all__ = [
+    "AutopilotOutcome",
+    "AutopilotService",
     "AudioProbeReport",
     "probe_audio_metadata",
     "Phase1Pipeline",

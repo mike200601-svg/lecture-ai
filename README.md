@@ -79,9 +79,10 @@ data/incoming/audio/
   ↓  watch 发现新文件，按课表匹配课程，建 session
 本地 faster-whisper 转录                    ← 音频不出本机
   ↓  transcript_raw.md（带时间戳）
-选择性重转录（只处理可疑片段）
+选择性重转录（只处理可疑片段）              ← watch 自动接着跑
   ↓  transcript_repaired.md               ← 本项目的核心产物
   ├─ export-package → GPT 网页会话（可带板书照片、课件）→ 成稿
+  │     ↑ watch 自动生成，课上完直接去投喂包目录取
   └─ note            → 一次 API 调用（纯文本）        → 成稿
   ↓
 final_note.md → 放进 Obsidian
@@ -436,6 +437,7 @@ python -m lecture_ai doctor
 
 ```powershell
 # 方式一：长驻监听，放进去就自动处理（推荐日常用）
+# 转录 → 选择性重转录 → 生成投喂包全自动，课上完直接去投喂包目录取
 python -m lecture_ai watch
 
 # 方式二：手动一步步来，方便看清每步在干什么
@@ -454,6 +456,23 @@ python -m lecture_ai repair <session_id>   # 对可疑片段做选择性重转�
 - `transcript_repaired.md` —— **修复后的正式转录，后面出稿只认这一份**
 
 拿到 `transcript_repaired.md` 之后，选一条出稿路线（下一节）。
+
+### watch 会自动跑到哪一步
+
+用 `watch` 长驻时，一节课录完之后**不需要再敲任何命令**：转录完成后会自动做
+选择性重转录，拿到 REPAIRED 就自动生成 GPT Web 投喂包，直接出现在投喂包目录里
+（见下文「投喂包生成在哪」）。
+
+投喂包是按输入指纹判断是否重建的，所以不会每轮重复打包；而课后才补拍的板书、
+或者你手动重跑 `repair` 换掉了转录，下一轮 watch 都会自动把投喂包更新掉。
+
+两个开关都在 `config.yaml` 的 `processing` 段，想退回手动就关掉：
+
+```yaml
+processing:
+  auto_repair: true            # 转录完成后自动跑 selective repair
+  auto_export_package: true    # 有 REPAIRED 后自动生成投喂包
+```
 
 ---
 
