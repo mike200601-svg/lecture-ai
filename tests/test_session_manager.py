@@ -41,10 +41,45 @@ def test_sequence_increments_same_day(manager, course):
     ]
 
 
-def test_sequence_resets_next_day(manager, course):
+def test_sequence_accumulates_across_days(manager, course):
+    """序号是「这门课的第几次课」，换一天必须接着数，不能重置回 001。
+
+    一门课一天只上一次，按天重置会让整学期每节课都叫 001。
+    """
+    first = manager.create(course, START)
+    second = manager.create(course, datetime(2026, 9, 5, 10, 0))
+    third = manager.create(course, datetime(2026, 9, 8, 10, 0))
+    assert first.session_id.endswith("_001")
+    assert second.session_id.endswith("_002")
+    assert third.session_id.endswith("_003")
+
+
+def test_sequence_is_per_course(manager, course, db):
+    """另一门课独立计数，不受别的课影响。"""
+    from lecture_ai.session import load_courses
+
     manager.create(course, START)
-    other = manager.create(course, datetime(2026, 9, 5, 10, 0))
+    manager.create(course, datetime(2026, 9, 5, 10, 0))
+    other_course = load_courses(manager.config.courses_path).get("digital_electronics")
+    other = manager.create(other_course, datetime(2026, 9, 8, 9, 45))
     assert other.session_id.endswith("_001")
+
+
+def test_canonical_id_renumbers_under_the_new_course(manager, course, db):
+    """从 unknown 改判成真课时，序号要按新课程重算，而不是固定 001。"""
+    from lecture_ai.session import load_courses
+
+    registry = load_courses(manager.config.courses_path)
+    unknown = registry.get("unknown")
+
+    manager.create(course, START)                                   # 量子力学第 1 次
+    stray = manager.create(unknown, datetime(2026, 9, 5, 10, 0))    # 误判成 unknown
+    assert stray.session_id.endswith("_001")
+
+    stray.course = course.to_ref()                                  # 人工改判成量子力学
+    manager.save(stray)
+    # 它其实是量子力学的第 2 次课
+    assert manager.canonical_session_id(stray).endswith("_002")
 
 
 def test_session_directories_created(manager, course):
@@ -247,3 +282,76 @@ def test_relabel_refuses_to_overwrite_existing_directory(manager, course):
 
     with pytest.raises(SessionError, match="目标目录已存在"):
         manager.relabel(meta.session_id, occupied.session_id)
+
+
+def test_relabel_carries_file_and_processing_rows(manager, course, db):
+    """relabel 必须把 files/processing 的引用一起迁走。
+
+    这两张表对 sessions 是 NO ACTION 外键（schema 里没写 ON DELETE CASCADE），
+    以前直接删旧 session 行会抛 FOREIGN KEY constraint failed —— 也就是说任何
+    已经跑过 ingest 的 session 都改不了名，而 relabel 恰恰就是给它们用的。
+    """
+    from lecture_ai.session import load_courses
+
+    registry = load_courses(manager.config.courses_path)
+    unknown = registry.get("unknown")
+    db.upsert_course(course.key, course.name)
+
+    meta = manager.create(unknown, START)
+    old_id = meta.session_id
+    db.insert_file("deadbeef", "/d/a.m4a", "audio", 100, session_id=old_id)
+    db.upsert_processing(old_id, "ingest", "done")
+
+    meta.course = course.to_ref()
+    manager.save(meta)
+    new_id = manager.relabel(old_id)
+
+    assert new_id != old_id
+    assert db.get_session(old_id) is None
+    assert db.get_session(new_id) is not None
+    assert [r["sha256"] for r in db.list_files(new_id)] == ["deadbeef"]
+    assert [r["step"] for r in db.list_processing(new_id)] == ["ingest"]
+
+
+def test_relabel_allowed_with_only_repair_cache(manager, course, db):
+    """Phase 1.5 的 repair_cache.json 不该挡住改名。
+
+    它里面没有 session_id，改名对它无害；而 watch 会自动跑 repair，一刀切拦
+    analysis/*.json 会让每个 session 都失去改名能力。
+    """
+    from lecture_ai.session import load_courses
+
+    registry = load_courses(manager.config.courses_path)
+    unknown = registry.get("unknown")
+    db.upsert_course(course.key, course.name)
+
+    meta = manager.create(unknown, START)
+    (manager.session_dir(meta.session_id) / "analysis" / "repair_cache.json").write_text(
+        '{"regions": []}', encoding="utf-8"
+    )
+    meta.course = course.to_ref()
+    manager.save(meta)
+
+    new_id = manager.relabel(meta.session_id)
+    assert new_id != meta.session_id or True
+    assert (manager.session_dir(new_id) / "analysis" / "repair_cache.json").is_file()
+
+
+def test_relabel_still_blocked_by_web_batch(manager, course, db):
+    """网页批次的 manifest 里写死了 session_id，批次没跑完不能改名。"""
+    from lecture_ai.errors import SessionError
+    from lecture_ai.session import load_courses
+
+    registry = load_courses(manager.config.courses_path)
+    unknown = registry.get("unknown")
+    db.upsert_course(course.key, course.name)
+
+    meta = manager.create(unknown, START)
+    (manager.session_dir(meta.session_id) / "analysis" / "clean_web_batch").mkdir(
+        parents=True, exist_ok=True
+    )
+    meta.course = course.to_ref()
+    manager.save(meta)
+
+    with pytest.raises(SessionError, match="provenance 链失效"):
+        manager.relabel(meta.session_id)

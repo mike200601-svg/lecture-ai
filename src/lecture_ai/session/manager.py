@@ -32,6 +32,18 @@ METADATA_FILENAME = "metadata.json"
 #: session 目录下的固定子目录
 SUBDIRS = ("raw", "audio", "transcript", "images", "slides", "analysis", "note", "logs")
 
+#: Phase 2 正式产物：内部写着 session_id 并用 SHA 串成 provenance 链，改名即失效。
+#: 刻意不包含 Phase 1.5 的 repair_cache.json —— 它里面没有 session_id。
+PROVENANCE_ARTIFACTS = (
+    "transcript_clean.json",
+    "outline.json",
+    "knowledge.json",
+    "audio_draft.json",
+)
+
+#: 网页批次目录，manifest 里写死了 session_id
+WEB_BATCH_DIR = "clean_web_batch"
+
 
 class SessionManager:
     def __init__(self, config: Config, db: Database) -> None:
@@ -56,14 +68,14 @@ class SessionManager:
         名字里带上课时间与课程，是为了光看目录名就知道这是哪一节课 —— 同一天上
         两门课、或同一门课上下午各一节时，只有日期是分不出来的。
 
-        序号在「同日同课程」内递增，且要避开磁盘上已存在的目录
-        （DB 被删过时仍然不能撞车）。旧格式 `日期_课程_序号` 的目录继续可读，
-        这里只影响新建的 session。
+        序号是「这门课的第几次课」（学期内累计），不是当天的第几次 —— 后者对一天
+        只上一次的课永远是 001。还要避开磁盘上已存在的目录（DB 被删过时仍然不能
+        撞车）。旧格式 `日期_课程_序号` 的目录继续可读，这里只影响新建的 session。
         """
         date_str = start.strftime("%Y-%m-%d")
         time_str = start.strftime("%H%M")
         slug = slugify(course.key)
-        seq = self.db.next_session_seq(date_str, course.key)
+        seq = self.db.course_sequence(course.key, to_iso(start))
         while True:
             candidate = f"{date_str}_{time_str}_{slug}_{seq:03d}"
             if not self.session_dir(candidate).exists():
@@ -113,21 +125,42 @@ class SessionManager:
 
         课程识别失败时 session 会落到 `unknown`，等人工把课程填对之后，目录名
         仍然停留在旧名字上。这个方法给出「它现在应该叫什么」。
+
+        序号要按**新课程**重算：原来挂在 unknown 名下的 001 换成量子力学之后，
+        它可能已经是量子力学的第 3 次课了。
         """
         start = parse_iso(meta.start_time)
         date_str = meta.date
         slug = slugify(meta.course.key)
+        seq = self.db.course_sequence(meta.course.key, meta.start_time)
         if start is None:
-            return f"{date_str}_{slug}_001"
-        return f"{date_str}_{start.strftime('%H%M')}_{slug}_001"
+            return f"{date_str}_{slug}_{seq:03d}"
+        return f"{date_str}_{start.strftime('%H%M')}_{slug}_{seq:03d}"
+
+    @staticmethod
+    def _provenance_artifacts(session_dir: Path) -> list[str]:
+        """列出会因改名而失效的 Phase 2 产物（含进行中的网页批次）。"""
+        analysis = session_dir / "analysis"
+        if not analysis.is_dir():
+            return []
+        found = [name for name in PROVENANCE_ARTIFACTS if (analysis / name).is_file()]
+        # 网页批次的 manifest 里写死了 session_id，批次没跑完也不能改名
+        if (analysis / WEB_BATCH_DIR).is_dir():
+            found.append(f"{WEB_BATCH_DIR}/")
+        return sorted(found)
 
     def relabel(self, session_id: str, new_id: str | None = None) -> str:
         """把 session 目录改名成能认出是哪节课的名字。
 
-        只改目录名、metadata.session_id 与数据库索引。**下游 analysis 产物一旦
-        存在就拒绝改名**：outline/knowledge/audio_draft 内部都写着 session_id，
-        而且彼此用 SHA 串成链，改写任何一个都会让整条 provenance 链失效。要给
-        已经跑完的 session 改名，只能改完重跑 Phase 2。
+        只改目录名、metadata.session_id 与数据库索引。**Phase 2 产物一旦存在就
+        拒绝改名**：transcript_clean/outline/knowledge/audio_draft 内部都写着
+        session_id，而且彼此用 SHA 串成链，改写任何一个都会让整条 provenance 链
+        失效。要给已经跑完 Phase 2 的 session 改名，只能改完重跑 Phase 2。
+
+        只拦这几样具名产物，不能拦 analysis 下所有 `*.json` —— Phase 1.5 的
+        `repair_cache.json` 里根本没有 session_id，改名对它无害；而 watch 现在
+        会自动跑 repair，一刀切会让每个 session 都失去改名能力，而 relabel 恰恰
+        就是给「课程认错了」准备的。
         """
         meta = self.load(session_id)
         target = new_id or self.canonical_session_id(meta)
@@ -138,10 +171,7 @@ class SessionManager:
         if target_dir.exists():
             raise SessionError(f"目标目录已存在，拒绝覆盖：{target_dir}")
 
-        analysis = source_dir / "analysis"
-        blocking = sorted(
-            path.name for path in analysis.glob("*.json")
-        ) if analysis.is_dir() else []
+        blocking = self._provenance_artifacts(source_dir)
         if blocking:
             raise SessionError(
                 f"session {session_id} 已有 Phase 2 产物（{', '.join(blocking[:5])}"
@@ -152,7 +182,8 @@ class SessionManager:
         source_dir.rename(target_dir)
         meta.session_id = target
         self.save(meta)
-        self.db.delete_session(session_id)
+        # 先建好新行再迁引用：files/processing 的外键没有级联，直接删旧行会失败。
+        self.db.rename_session(session_id, target)
         self.log.info(
             "session 改名 %s -> %s（课程：%s）", session_id, target, meta.course.name
         )

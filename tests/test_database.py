@@ -50,12 +50,54 @@ def test_list_sessions_filter_and_counts(db):
     assert db.count_sessions_by_state() == {"TRANSCRIBED": 2, "FAILED": 1}
 
 
-def test_next_session_seq(db):
+def test_course_sequence_counts_across_the_whole_term(db):
+    """序号是「这门课的第几次课」，不是「今天的第几次」。
+
+    一门课一天只上一次，按天计数会让每节课都叫 001，等于没有信息量。
+    """
     db.upsert_course("qm", "量子力学")
-    assert db.next_session_seq("2026-09-03", "qm") == 1
-    db.upsert_session("2026-09-03_qm_001", "qm", "2026-09-03", "NEW", "/d")
-    assert db.next_session_seq("2026-09-03", "qm") == 2
-    assert db.next_session_seq("2026-09-04", "qm") == 1  # 换一天重新计数
+    assert db.course_sequence("qm", "2026-09-02T09:45:00+08:00") == 1
+
+    db.upsert_session("s1", "qm", "2026-09-02", "NEW", "/d/s1",
+                      start_time="2026-09-02T09:45:00+08:00")
+    # 换一天不再重新计数：这是第 2 次课
+    assert db.course_sequence("qm", "2026-09-07T09:44:00+08:00") == 2
+
+    db.upsert_session("s2", "qm", "2026-09-07", "NEW", "/d/s2",
+                      start_time="2026-09-07T09:44:00+08:00")
+    assert db.course_sequence("qm", "2026-09-09T09:45:00+08:00") == 3
+
+
+def test_course_sequence_is_positional_not_total(db):
+    """已入库的 session 自己不能把自己算进去，否则 relabel 会一直往后漂。"""
+    db.upsert_course("qm", "量子力学")
+    for i, ts in enumerate(("2026-09-02T09:45:00+08:00",
+                            "2026-09-07T09:44:00+08:00",
+                            "2026-09-09T09:45:00+08:00"), start=1):
+        db.upsert_session(f"s{i}", "qm", ts[:10], "NEW", f"/d/s{i}", start_time=ts)
+
+    # 中间那节课重新求位次，仍应是 2 而不是 4
+    assert db.course_sequence("qm", "2026-09-07T09:44:00+08:00") == 2
+    # 补录一节更早的课，排在最前面
+    assert db.course_sequence("qm", "2026-08-31T09:45:00+08:00") == 1
+
+
+def test_course_sequence_is_per_course(db):
+    db.upsert_course("qm", "量子力学")
+    db.upsert_course("de", "数字电子技术基础")
+    db.upsert_session("s1", "qm", "2026-09-02", "NEW", "/d/s1",
+                      start_time="2026-09-02T09:45:00+08:00")
+    db.upsert_session("s2", "qm", "2026-09-07", "NEW", "/d/s2",
+                      start_time="2026-09-07T09:44:00+08:00")
+    # 另一门课独立计数
+    assert db.course_sequence("de", "2026-09-08T09:45:00+08:00") == 1
+
+
+def test_course_sequence_without_start_time(db):
+    db.upsert_course("qm", "量子力学")
+    db.upsert_session("s1", "qm", "2026-09-02", "NEW", "/d/s1",
+                      start_time="2026-09-02T09:45:00+08:00")
+    assert db.course_sequence("qm", None) == 2
 
 
 def test_file_dedup(db):

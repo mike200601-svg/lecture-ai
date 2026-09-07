@@ -119,9 +119,37 @@ class Database:
             )
 
     def delete_session(self, session_id: str) -> None:
-        """删除 session 索引行。session 改名后用来清掉旧行。"""
+        """删除 session 索引行。
+
+        注意 files / processing 对 sessions 是 NO ACTION（schema 里没写
+        ON DELETE CASCADE），只要还有子行引用就会被外键挡住。改名请用
+        `rename_session`，彻底删除请先自行清掉子行。
+        """
         with self.connect() as conn:
             conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+    def rename_session(self, old_id: str, new_id: str) -> None:
+        """把索引整体迁到新 session_id，在一个事务里完成。
+
+        files / processing 都带 `REFERENCES sessions(id)` 却没有级联，所以直接
+        删旧行会抛 FOREIGN KEY constraint failed —— 任何已经跑过 ingest 的
+        session 都会因此 relabel 失败。必须先把子行的引用迁到新 id 再删旧行。
+
+        调用前新 session 行必须已存在（否则 UPDATE 又会撞外键）。
+        """
+        with self.connect() as conn:
+            if conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (new_id,)
+            ).fetchone() is None:
+                raise ValueError(f"重命名目标尚未入库：{new_id}")
+            conn.execute(
+                "UPDATE files SET session_id = ? WHERE session_id = ?", (new_id, old_id)
+            )
+            conn.execute(
+                "UPDATE processing SET session_id = ? WHERE session_id = ?",
+                (new_id, old_id),
+            )
+            conn.execute("DELETE FROM sessions WHERE id = ?", (old_id,))
 
     def get_session(self, session_id: str) -> sqlite3.Row | None:
         with self.connect() as conn:
@@ -147,13 +175,29 @@ class Database:
             ).fetchall()
         return {r["state"]: r["n"] for r in rows}
 
-    def next_session_seq(self, date: str, course_key: str) -> int:
-        """同一天同一门课的第几次课（用于 session_id 末尾的 001/002）。"""
+    def course_sequence(self, course_key: str, start_time: str | None = None) -> int:
+        """这门课的第几次课（用于 session_id 末尾的 001/002/003）。
+
+        以前是按「同日同课」计数的，可一门课一天基本只上一次，序号于是永远停在
+        001，等于没有信息量 —— 第 2 次课的录音仍然叫 `..._001`。改成按课程累计：
+        序号 = 这门课里开始时间早于本节的 session 数 + 1。
+
+        用「早于本节的条数」而不是「总条数 + 1」，是为了让已经入库的 session 也能
+        算出正确的位次（relabel 时要用），自己不会把自己算进去。
+        start_time 缺失时退化成总数 + 1。
+        """
         with self.connect() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM sessions WHERE date = ? AND course_key = ?",
-                (date, course_key),
-            ).fetchone()
+            if start_time is None:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM sessions WHERE course_key = ?",
+                    (course_key,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM sessions "
+                    "WHERE course_key = ? AND start_time IS NOT NULL AND start_time < ?",
+                    (course_key, start_time),
+                ).fetchone()
         return int(row["n"]) + 1
 
     # ---------------------------------------------------------------- files
