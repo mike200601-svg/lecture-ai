@@ -20,6 +20,7 @@ from lecture_ai.database import Database
 from lecture_ai.errors import AudioError, IngestError, LectureAIError
 from lecture_ai.ingestion.scanner import AudioScanner, DiscoveredFile, guess_start_time
 from lecture_ai.logging_setup import attach_session_log, detach_session_log, get_logger
+from lecture_ai.pipeline.progress import ProgressWriter
 from lecture_ai.session import (
     PHASE1_DONE_STATES,
     SessionManager,
@@ -315,23 +316,32 @@ class Phase1Pipeline:
             provider=transcriber.name, model=transcriber.model_name,
         )
 
+        progress = ProgressWriter(session_dir)
+        progress.update(0.0, meta.audio.duration_sec or 0.0, force=True)
+
         def on_progress(done: float, total: float) -> None:
             if total > 0:
                 slog.info("转录进度 %s / %s（%.0f%%）",
                           hhmmss(done), hhmmss(total), done / total * 100)
+            progress.update(done, total)
 
         try:
             chunk_dir = session_dir / "audio" / "chunks"
             chunk_files = sorted(chunk_dir.glob("chunk_*.wav")) if chunk_dir.exists() else []
             if chunk_files:
                 result = self._transcribe_chunks(
-                    transcriber, chunk_files, options, on_progress, slog
+                    transcriber, chunk_files, options, on_progress, slog,
+                    total_sec=meta.audio.duration_sec or 0.0,
                 )
             else:
                 result = transcriber.transcribe(audio_path, options, on_progress)
         except LectureAIError as exc:
             self.sessions.mark_step(meta, STEP_TRANSCRIBE, "failed", error=str(exc))
             raise
+        finally:
+            # 成功路径下面还要写 transcript，进度文件到这里就没用了；
+            # 留着只会让面板显示一个停在 100% 的残影。
+            progress.clear()
 
         if not result.segments:
             raise AudioError(
@@ -355,7 +365,8 @@ class Phase1Pipeline:
         slog.info("转录产出 %d 个片段，耗时 %.1f 分钟", len(result.segments), elapsed / 60)
         return False
 
-    def _transcribe_chunks(self, transcriber, chunk_files, options, on_progress, slog):
+    def _transcribe_chunks(self, transcriber, chunk_files, options, on_progress, slog,
+                           *, total_sec: float = 0.0):
         """切片模式：逐片转录后按偏移合并时间轴。"""
         chunk_sec = self.config.audio.chunking.chunk_minutes * 60
         overlap = self.config.audio.chunking.overlap_seconds
@@ -364,7 +375,13 @@ class Phase1Pipeline:
         results = []
         for i, chunk in enumerate(chunk_files):
             slog.info("转录切片 %d/%d：%s", i + 1, len(chunk_files), chunk.name)
-            results.append((transcriber.transcribe(chunk, options, on_progress), i * step))
+            offset = i * step
+            # 每片的进度都是从 0 开始的，直接往上报会让整体进度每片归零一次。
+            # 加上片偏移、并把总长换成整段录音的时长，才是「整节课的进度」。
+            def chunk_progress(done: float, total: float, _off: float = offset) -> None:
+                on_progress(_off + done, total_sec or (len(chunk_files) * step))
+
+            results.append((transcriber.transcribe(chunk, options, chunk_progress), offset))
         return merge_chunk_results(results, overlap_sec=overlap)
 
     def _get_transcriber(self):

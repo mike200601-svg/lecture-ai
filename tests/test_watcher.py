@@ -154,3 +154,68 @@ def test_watch_survives_autopilot_errors(config, pipeline):
     watcher._sleep = lambda _s: None
     assert watcher.run(max_iterations=2) == 0
     assert boom.rounds == 2
+
+
+# ----------------------------------------------------------------- 存活探测
+
+
+def test_watch_status_reports_not_running_without_lock(config):
+    """没有锁文件 = 没在跑。这是面板最常见的一种回答。"""
+    from lecture_ai.pipeline.watcher import watch_status
+
+    status = watch_status(config)
+    assert status["running"] is False
+    assert status["pid"] is None
+
+
+def test_watch_status_sees_a_fresh_heartbeat(config):
+    from lecture_ai.pipeline.watcher import LOCK_FILENAME, watch_status
+
+    config.paths.cache_dir.mkdir(parents=True, exist_ok=True)
+    (config.paths.cache_dir / LOCK_FILENAME).write_text(str(os.getpid()), encoding="utf-8")
+
+    status = watch_status(config)
+    assert status["running"] is True
+    assert status["pid"] == os.getpid()
+    assert status["heartbeat_age_sec"] < 5
+
+
+def test_watch_status_flags_a_dead_process_with_stale_heartbeat(config):
+    """心跳过期且 PID 已不存在 —— 锁是上次崩溃残留的，必须如实说没在跑。"""
+    from lecture_ai.pipeline.watcher import LOCK_FILENAME, watch_status
+
+    config.paths.cache_dir.mkdir(parents=True, exist_ok=True)
+    lock = config.paths.cache_dir / LOCK_FILENAME
+    lock.write_text("999999", encoding="utf-8")     # 几乎不可能存在的 PID
+    old = time.time() - 86400
+    os.utime(lock, (old, old))
+
+    status = watch_status(config)
+    assert status["running"] is False
+    assert status["stale_lock"] is True
+
+
+def test_heartbeat_refreshes_lock_mtime(config):
+    """心跳要真的把 mtime 推新，否则转录期间 watch 会被误判成死了。"""
+    config.paths.cache_dir.mkdir(parents=True, exist_ok=True)
+    lock = SingleInstanceLock(config.paths.cache_dir / "hb.lock")
+    assert lock.acquire()
+    try:
+        old = time.time() - 3600
+        os.utime(lock.lock_path, (old, old))
+        assert time.time() - lock.lock_path.stat().st_mtime > 1000
+
+        lock.heartbeat()
+        assert time.time() - lock.lock_path.stat().st_mtime < 5
+    finally:
+        lock.release()
+
+
+def test_heartbeat_on_unheld_lock_is_a_noop(config):
+    """没拿到锁的实例不该去覆盖别人的锁文件。"""
+    config.paths.cache_dir.mkdir(parents=True, exist_ok=True)
+    path = config.paths.cache_dir / "foreign.lock"
+    path.write_text("12345", encoding="utf-8")
+
+    SingleInstanceLock(path).heartbeat()          # 未 acquire
+    assert path.read_text(encoding="utf-8") == "12345"

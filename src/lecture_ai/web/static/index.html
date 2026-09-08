@@ -69,6 +69,26 @@
   dd { margin: 0; }
   #msg:empty { display: none; }
   #msg { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+
+  /* ---- 流水线状态 ---- */
+  #status { grid-column: 1 / -1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.live { background: var(--accent); }
+  .dot.dead { background: var(--err); }
+  .dot.idle { background: var(--muted); }
+  .bar {
+    height: 8px; border-radius: 999px; background: var(--bg);
+    border: 1px solid var(--line); overflow: hidden; margin: 6px 0 2px;
+  }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+  .job { padding: 10px 0; border-top: 1px solid var(--line); }
+  .job:first-of-type { border-top: 0; padding-top: 0; }
+  .job b { font-weight: 600; }
+  #logtail {
+    max-height: 190px; font-size: 11.5px; line-height: 1.5;
+    color: var(--muted); margin-top: 10px;
+  }
+  details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -86,6 +106,11 @@
 <div id="msg"></div>
 
 <main>
+  <section id="status">
+    <h2>流水线状态</h2>
+    <div class="body" id="statusbody"><p class="muted">加载中…</p></div>
+  </section>
+
   <section>
     <h2>课堂列表</h2>
     <table>
@@ -106,6 +131,12 @@
 const $ = (id) => document.getElementById(id);
 let selected = null;
 let runtime = {};
+let logOpen = false;      // 日志折叠状态要跨自动刷新保留，否则每 5 秒被合上一次
+let statusTimer = null;
+
+//: 状态区自动刷新间隔。转录一节课要 45–65 分钟，进度本身每 30 秒音频才动一次，
+//: 5 秒足够跟手，也不至于让面板一直打扰后台。
+const STATUS_INTERVAL_MS = 5000;
 
 function msg(text, cls) {
   const el = $("msg");
@@ -126,6 +157,102 @@ function minutes(sec) {
 
 function tick(ok) {
   return ok ? '<span class="pill on">有</span>' : '<span class="pill off">无</span>';
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+function hms(sec) {
+  if (!sec && sec !== 0) return "—";
+  const s = Math.max(0, Math.round(sec));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? h + " 小时 " + m + " 分" : m + " 分钟";
+}
+
+function ago(sec) {
+  if (sec == null) return "—";
+  if (sec < 60) return Math.round(sec) + " 秒前";
+  if (sec < 3600) return Math.round(sec / 60) + " 分钟前";
+  return (sec / 3600).toFixed(1) + " 小时前";
+}
+
+// 正在转录的一节课：进度条 + 剩余时间估算
+function jobHtml(j) {
+  const p = j.progress;
+  let inner = "<b>" + esc(j.course || j.session_id) + "</b> " +
+              '<span class="muted">' + esc(j.session_id) + "</span>";
+  if (!p) {
+    // 状态是 TRANSCRIBING 但没有进度文件：多半是刚起步，或者 watch 中途被杀了
+    return '<div class="job">' + inner +
+           '<div class="muted">已进入转录，但还没有进度数据 —— 刚开始，或者上次转录被中断了。</div></div>';
+  }
+  const pct = p.percent == null ? 0 : p.percent;
+  inner += '<div class="bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>';
+  inner += '<div class="muted">' + pct.toFixed(0) + "% · 已转 " + hms(p.done_sec) +
+           " / 共 " + hms(p.total_sec) + " · 更新于 " + ago(p.age_sec);
+  // 本机 CPU int8 实测约 0.44–0.67 倍速，取 0.55 估个数量级就够了
+  if (p.percent != null && p.percent > 2 && p.percent < 100 && !p.stale) {
+    const left = (p.total_sec - p.done_sec) * 0.55;
+    inner += " · 约剩 " + hms(left);
+  }
+  inner += "</div>";
+  if (p.stale) {
+    inner += '<div class="err">进度已经 ' + ago(p.age_sec) +
+             '没有更新，转录进程可能已经中断。用 <code>lecture-ai retry ' +
+             esc(j.session_id) + "</code> 重跑。</div>";
+  }
+  return '<div class="job">' + inner + "</div>";
+}
+
+async function loadStatus() {
+  const box = $("statusbody");
+  let s;
+  try {
+    s = await api("/api/status");
+  } catch (e) {
+    box.innerHTML = '<p class="err">' + esc(e.message) + "</p>";
+    return;
+  }
+
+  const w = s.watch || {};
+  let html = '<div class="row" style="margin-bottom:10px">';
+  if (w.running) {
+    html += '<span><span class="dot live"></span>watch 运行中' +
+            (w.pid ? '<span class="muted"> · PID ' + w.pid + "</span>" : "") +
+            (w.heartbeat_age_sec != null
+              ? '<span class="muted"> · 心跳 ' + ago(w.heartbeat_age_sec) + "</span>" : "") +
+            "</span>";
+  } else {
+    html += '<span><span class="dot dead"></span><b>watch 没在运行</b>' +
+            '<span class="muted"> · 新录音不会被自动处理</span></span>';
+  }
+  html += "</div>";
+
+  if (!w.running) {
+    html += '<p class="muted">启动它：<code>python -m lecture_ai watch</code>' +
+            (w.stale_lock ? "（锁文件是上次残留的，重启会自动接管）" : "") + "</p>";
+  }
+
+  if (s.transcribing && s.transcribing.length) {
+    html += s.transcribing.map(jobHtml).join("");
+  } else {
+    html += '<div class="job"><span class="dot idle"></span>' +
+            "当前没有正在转录的课。</div>";
+  }
+
+  if (s.waiting && s.waiting.length) {
+    html += '<div class="job"><span class="muted">排队中（' + s.waiting.length + " 节）：</span> " +
+            s.waiting.map((j) => esc(j.course || j.session_id)).join("、") + "</div>";
+  }
+
+  const lines = s.log_tail || [];
+  html += "<details" + (logOpen ? " open" : "") + ' id="logbox"><summary>最近日志（' +
+          lines.length + " 行）</summary><pre id=\"logtail\">" +
+          (lines.length ? esc(lines.join("\n")) : "（日志为空）") + "</pre></details>";
+
+  box.innerHTML = html;
+  $("logbox").ontoggle = (e) => { logOpen = e.target.open; };
 }
 
 async function loadRuntime() {
@@ -284,14 +411,28 @@ $("savekey").onclick = async () => {
 $("reload").onclick = async () => {
   msg("");
   await loadRuntime();
+  await loadStatus();
   await loadSessions();
   if (selected) await select(selected);
 };
 
+// 页面被切到后台时停掉轮询：没人看的时候不该继续敲服务端。
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    clearInterval(statusTimer);
+    statusTimer = null;
+  } else if (!statusTimer) {
+    loadStatus();
+    statusTimer = setInterval(loadStatus, STATUS_INTERVAL_MS);
+  }
+});
+
 (async () => {
   try {
     await loadRuntime();
+    await loadStatus();
     await loadSessions();
+    statusTimer = setInterval(loadStatus, STATUS_INTERVAL_MS);
   } catch (e) {
     msg(e.message, "err");
   }

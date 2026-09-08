@@ -48,6 +48,20 @@ class SingleInstanceLock:
         self._acquired = True
         return True
 
+    def heartbeat(self) -> None:
+        """每轮刷新锁文件，让它的 mtime 成为「watch 还活着」的证据。
+
+        没有心跳的话，探活只能靠 :func:`_pid_alive`，而它在 Windows 上要起一个
+        tasklist 子进程 —— WebUI 每几秒轮询一次就会不停 fork。改成看 mtime 后
+        探活是一次 stat，零子进程。
+        """
+        if not self._acquired:
+            return
+        try:
+            self.lock_path.write_text(str(os.getpid()), encoding="utf-8")
+        except OSError as exc:
+            log.debug("刷新 watch 锁文件失败（忽略）：%s", exc)
+
     def release(self) -> None:
         if self._acquired:
             self.lock_path.unlink(missing_ok=True)
@@ -76,6 +90,37 @@ def _pid_alive(pid: int) -> bool:
         return True
     except (OSError, ProcessLookupError):
         return False
+
+
+def watch_status(config: Config) -> dict:
+    """watch 长驻进程是否在跑。给 WebUI 回答「它到底有没有在工作」。
+
+    优先看锁文件的 mtime（一次 stat）：心跳比 poll_interval 的几倍还旧才退回去
+    查 PID。这样正常情况下探活不起任何子进程。
+    """
+    lock_path = config.paths.cache_dir / LOCK_FILENAME
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+        age = max(0.0, time.time() - lock_path.stat().st_mtime)
+    except OSError:
+        return {"running": False, "pid": None, "heartbeat_age_sec": None}
+
+    try:
+        pid = int(raw or 0)
+    except ValueError:
+        pid = 0
+
+    # 容忍两轮丢拍：一轮在处理长任务（转录）时可能远超 poll_interval，
+    # 所以下限拉到 90 秒，避免转录期间把自己判成死了。
+    tolerance = max(90.0, config.processing.poll_interval * 3.0)
+    alive = age <= tolerance or (bool(pid) and _pid_alive(pid))
+    return {
+        "running": alive,
+        "pid": pid or None,
+        "heartbeat_age_sec": round(age, 1),
+        # 锁还在但进程没了 —— 下次 watch 启动会自动接管，这里只是如实报告
+        "stale_lock": bool(pid) and not alive,
+    }
 
 
 class Watcher:
@@ -113,6 +158,7 @@ class Watcher:
         iterations = 0
         try:
             while not self._stop:
+                lock.heartbeat()   # 每轮盖一次时间戳，WebUI 靠它判断死活
                 try:
                     outcomes = self.pipeline.run_once()
                     for o in outcomes:

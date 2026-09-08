@@ -33,8 +33,9 @@ from urllib.parse import unquote, urlparse
 from lecture_ai.config import Config
 from lecture_ai.database import Database
 from lecture_ai.errors import LectureAIError
+from lecture_ai.pipeline.progress import read_progress
 from lecture_ai.repair import REPAIRED_MD
-from lecture_ai.session import SessionManager
+from lecture_ai.session import SessionManager, SessionState
 from lecture_ai.utils.naming import final_note_name, identity_prefix
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,59 @@ class AppState:
         if not path.is_file():
             raise LectureAIError(f"session {session_id} 还没有成稿。")
         return path.read_text(encoding="utf-8")
+
+    def status(self) -> dict:
+        """流水线此刻在干什么。面板顶部那块「它到底有没有在工作」就靠这个。
+
+        故意做成一个独立接口而不是塞进 /api/sessions：它要被每几秒轮询一次，
+        必须便宜 —— 只读 metadata、一个进度文件、一次 stat 和日志尾部，
+        不碰转录、不起子进程。
+        """
+        from lecture_ai.pipeline.watcher import watch_status
+
+        manager = self.sessions()
+        transcribing: list[dict] = []
+        waiting: list[dict] = []
+        for session_id in sorted(manager.list_ids(), reverse=True):
+            try:
+                meta = manager.load(session_id)
+            except LectureAIError:
+                continue      # 坏 session 已经在 /api/sessions 里报过了
+            row = {
+                "session_id": session_id,
+                "course": meta.course.name,
+                "state": str(meta.state),
+                "duration_sec": meta.audio.duration_sec,
+            }
+            if meta.state == SessionState.TRANSCRIBING:
+                row["progress"] = read_progress(manager.session_dir(session_id))
+                transcribing.append(row)
+            elif meta.state == SessionState.AUDIO_READY:
+                waiting.append(row)
+
+        return {
+            "watch": watch_status(self.config),
+            "transcribing": transcribing,
+            "waiting": waiting,
+            "log_tail": self.log_tail(),
+        }
+
+    def log_tail(self, lines: int = 12) -> list[str]:
+        """日志尾部。只 seek 最后 64 KB —— 日志会长到几十兆，不能整读。"""
+        path = self.config.paths.log_dir / "lecture-ai.log"
+        try:
+            with path.open("rb") as f:
+                size = f.seek(0, 2)
+                f.seek(max(0, size - 64 * 1024))
+                raw = f.read()
+        except OSError:
+            return []
+        # 从中间切进去的第一行多半是半截，宁可丢掉
+        text = raw.decode("utf-8", errors="replace")
+        rows = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+        if size > 64 * 1024 and rows:
+            rows = rows[1:]
+        return rows[-lines:]
 
     def runtime(self) -> dict:
         """注意：只回「令牌是否已设置」，永不回令牌本身。"""
@@ -262,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._serve_page()
             elif path == "/api/runtime":
                 self._json(self.state.runtime())
+            elif path == "/api/status":
+                self._json(self.state.status())
             elif path == "/api/sessions":
                 self._json({"sessions": self.state.list_sessions()})
             elif path.startswith("/api/sessions/"):

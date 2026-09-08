@@ -271,3 +271,75 @@ def test_bind_failure_surfaces_as_oserror(config):
             make_server(config, "127.0.0.1", taken)
     finally:
         holder.close()
+
+
+# ----------------------------------------------------------------- 流水线状态
+
+
+def test_status_reports_watch_not_running(server):
+    """面板要能回答的第一个问题：watch 到底在不在跑。"""
+    status, body = get(server, "/api/status")
+    assert status == 200
+    assert body["watch"]["running"] is False
+    assert body["transcribing"] == []
+
+
+def test_status_exposes_transcription_progress(server, config, db):
+    from lecture_ai.pipeline.progress import ProgressWriter
+    from lecture_ai.session import SessionState
+
+    manager, meta = _session(config, db, repaired=False)
+    manager.transition(meta, SessionState.AUDIO_READY)
+    manager.transition(meta, SessionState.TRANSCRIBING)
+    ProgressWriter(manager.session_dir(meta.session_id)).update(1500.0, 6000.0, force=True)
+
+    _, body = get(server, "/api/status")
+    assert [j["session_id"] for j in body["transcribing"]] == [meta.session_id]
+    assert body["transcribing"][0]["progress"]["percent"] == 25.0
+
+
+def test_status_lists_sessions_waiting_for_transcription(server, config, db):
+    from lecture_ai.session import SessionState
+
+    manager, meta = _session(config, db, repaired=False)
+    manager.transition(meta, SessionState.AUDIO_READY)
+
+    _, body = get(server, "/api/status")
+    assert [j["session_id"] for j in body["waiting"]] == [meta.session_id]
+    assert body["transcribing"] == []
+
+
+def test_status_survives_a_transcribing_session_without_progress_file(server, config, db):
+    """转录刚起步、或上次被杀掉：没有进度文件也必须能出状态，不能 500。"""
+    from lecture_ai.session import SessionState
+
+    manager, meta = _session(config, db, repaired=False)
+    manager.transition(meta, SessionState.AUDIO_READY)
+    manager.transition(meta, SessionState.TRANSCRIBING)
+
+    status, body = get(server, "/api/status")
+    assert status == 200
+    assert body["transcribing"][0]["progress"] is None
+
+
+def test_status_never_leaks_the_api_key(server, config, db):
+    """状态接口每几秒被轮询一次，是最容易被忽略的泄露面。"""
+    _session(config, db)
+    post(server, "/api/key", {"api_key": SECRET})
+
+    _, body = get(server, "/api/status")
+    assert SECRET not in json.dumps(body, ensure_ascii=False)
+
+
+def test_log_tail_returns_last_lines_without_reading_whole_file(config):
+    """日志会长到几十兆，尾部读取不能整文件读进内存。"""
+    config.paths.log_dir.mkdir(parents=True, exist_ok=True)
+    path = config.paths.log_dir / "lecture-ai.log"
+    path.write_text("\n".join(f"第 {i} 行" for i in range(5000)), encoding="utf-8")
+
+    tail = AppState(config).log_tail(lines=5)
+    assert tail == [f"第 {i} 行" for i in range(4995, 5000)]
+
+
+def test_log_tail_is_empty_when_no_log_file(config):
+    assert AppState(config).log_tail() == []
