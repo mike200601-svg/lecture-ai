@@ -28,6 +28,9 @@ _INSTALL_HINT = (
     "  3) 在 config/config.yaml 里设置 audio.ffmpeg_path 指向 ffmpeg 可执行文件"
 )
 
+# 非 Windows 上该常量不存在，取 0 表示「不加任何 creation flag」
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 _DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d\d):(\d\d\.\d+)")
 _STREAM_RE = re.compile(r"Audio:.*?,\s*(\d+)\s*Hz,\s*([^,]+)")
 
@@ -104,7 +107,13 @@ def ffmpeg_version(tools: FFmpegTools) -> str:
 
 
 def _run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
-    """统一的子进程调用。传 list 而非字符串，避免中文路径被 shell 拆坏。"""
+    """统一的子进程调用。传 list 而非字符串，避免中文路径被 shell 拆坏。
+
+    CREATE_NO_WINDOW 是必需的：watch 用 pythonw.exe 跑时父进程没有控制台，
+    Windows 会给每个 ffmpeg/ffprobe 新分配一个控制台窗口，屏幕上就是每轮
+    轮询闪两下黑框。长期高频分配控制台还会把 desktop heap 顶到临界，
+    ffmpeg 偶发以 0xc0000142（DLL 初始化失败）启动不起来。
+    """
     return subprocess.run(
         cmd,
         capture_output=True,
@@ -113,6 +122,7 @@ def _run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProc
         errors="replace",
         timeout=timeout,
         check=False,
+        creationflags=_NO_WINDOW,
     )
 
 

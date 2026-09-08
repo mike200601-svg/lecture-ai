@@ -67,6 +67,8 @@ def _pid_alive(pid: int) -> bool:
         result = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
             capture_output=True, text=True, check=False,
+            # pythonw.exe 下不加这个会闪一个黑框，见 audio/ffmpeg.py:_run
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return str(pid) in (result.stdout or "")
     try:

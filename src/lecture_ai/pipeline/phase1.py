@@ -47,6 +47,15 @@ STEP_INGEST = "ingest"
 STEP_PREPROCESS = "preprocess"
 STEP_TRANSCRIBE = "transcribe"
 
+# ingest 失败后的重试退避（秒）。ingest 失败不建 session，没有任何状态记住
+# 这个文件失败过，不退避的话 watch 会每个 poll_interval 起两个 ffmpeg 硬撞
+# 同一个文件，直到天荒地老。
+_INGEST_BACKOFF_SEC = [30, 60, 120, 300, 600, 1800]
+
+# 「还在录 / 还没同步完」的特征：m4a 的 moov atom 写在文件末尾，录音机没收尾
+# 就没有它。这不是错误，是预期状态，日志降到 info，别刷屏。
+_INCOMPLETE_MARKERS = ("moov atom not found", "Invalid data found when processing input")
+
 
 @dataclass
 class ProcessOutcome:
@@ -67,6 +76,8 @@ class Phase1Pipeline:
         # one_shot：命令跑完就退出，扫描时需要就地补采样（详见 scanner.is_stable）
         self.scanner = AudioScanner(config, self.db, one_shot=one_shot)
         self._transcriber = None  # 懒加载并在多个 session 间复用，避免反复加载模型
+        # path -> (失败次数, 下次可重试的时间戳)。只在进程内存活，重启即清空。
+        self._ingest_backoff: dict[Path, tuple[int, float]] = {}
 
     # ------------------------------------------------------------------ ingest
 
@@ -74,15 +85,37 @@ class Phase1Pipeline:
         """扫描 incoming，为每个新音频建立 session。"""
         discovered = self.scanner.scan()
         created: list[SessionMeta] = []
+        now = time.time()
         for item in discovered:
+            if self._ingest_deferred(item.path, now):
+                continue
             try:
                 meta = self.ingest_file(item)
                 if meta is not None:
                     created.append(meta)
             except LectureAIError as exc:
                 # 单个文件失败不能拖垮整轮扫描
-                log.error("处理文件失败：%s（%s）", item.path.name, exc)
+                self._note_ingest_failure(item.path, exc)
+            else:
+                self._ingest_backoff.pop(item.path, None)
         return created
+
+    def _ingest_deferred(self, path: Path, now: float) -> bool:
+        """这个文件还在退避窗口里就跳过，避免每轮都去起 ffmpeg 硬撞。"""
+        entry = self._ingest_backoff.get(path)
+        return entry is not None and now < entry[1]
+
+    def _note_ingest_failure(self, path: Path, exc: LectureAIError) -> None:
+        fails = self._ingest_backoff.get(path, (0, 0.0))[0] + 1
+        delay = _INGEST_BACKOFF_SEC[min(fails, len(_INGEST_BACKOFF_SEC)) - 1]
+        self._ingest_backoff[path] = (fails, time.time() + delay)
+
+        text = str(exc)
+        if any(m in text for m in _INCOMPLETE_MARKERS):
+            # 录音还没收尾，等就是了。不刷 ERROR，也不打整段 ffmpeg 输出。
+            log.info("%s 尚未写完（第 %d 次），%d 秒后再试", path.name, fails, delay)
+        else:
+            log.error("处理文件失败：%s（%s），%d 秒后重试", path.name, exc, delay)
 
     def ingest_file(self, item: DiscoveredFile) -> SessionMeta | None:
         """把一个音频文件收进新 session。"""
