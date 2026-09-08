@@ -203,3 +203,95 @@ def test_watch_mode_needs_two_polls(config, db):
     scanner = AudioScanner(config, db, one_shot=False)
     assert scanner.scan() == []
     assert len(scanner.scan()) == 1
+
+
+# --------------------------------------------------------- ingest 失败退避
+
+
+@pytest.fixture
+def pipe(config, db):
+    from lecture_ai.pipeline import Phase1Pipeline
+
+    return Phase1Pipeline(config, db)
+
+
+def _fail(pipe, path, message):
+    from lecture_ai.errors import IngestError
+
+    pipe._note_ingest_failure(path, IngestError(message))
+
+
+INCOMPLETE = "无法解析音频 x.m4a：moov atom not found"
+BROKEN = "ffmpeg 不见了"
+
+
+def test_incomplete_file_backs_off_gently(tmp_path, pipe):
+    """还没同步完是会自己好的暂态，封顶必须小。
+
+    2026-09-08 的回归：这里曾经和真错误共用一张顶到 1800 秒的表，
+    结果一节课同步完成后白等了半小时才被发现。
+    """
+    from lecture_ai.pipeline.phase1 import _INCOMPLETE_BACKOFF_SEC
+
+    f = tmp_path / "x.m4a"
+    f.write_bytes(b"x" * 10)
+    for _ in range(10):
+        _fail(pipe, f, INCOMPLETE)
+
+    _fails, next_at, _sig = pipe._ingest_backoff[f]
+    assert next_at - time.time() <= max(_INCOMPLETE_BACKOFF_SEC) + 1
+    assert max(_INCOMPLETE_BACKOFF_SEC) <= 60
+
+
+def test_real_error_backs_off_far_harder(tmp_path, pipe):
+    """真错误等多久都不会自己好，退远一点只为留条日志。"""
+    f = tmp_path / "y.m4a"
+    f.write_bytes(b"y" * 10)
+    for _ in range(10):
+        _fail(pipe, f, BROKEN)
+
+    _fails, next_at, _sig = pipe._ingest_backoff[f]
+    assert next_at - time.time() > 600
+
+
+def test_backoff_defers_then_expires(tmp_path, pipe):
+    f = tmp_path / "z.m4a"
+    f.write_bytes(b"z" * 10)
+    _fail(pipe, f, INCOMPLETE)
+
+    assert pipe._ingest_deferred(f, time.time()) is True
+    assert pipe._ingest_deferred(f, time.time() + 3600) is False
+
+
+def test_a_changed_file_clears_the_backoff_immediately(tmp_path, pipe):
+    """Syncthing 又写进来一截 —— 文件在变就是有进展，没理由继续罚站。"""
+    f = tmp_path / "grow.m4a"
+    f.write_bytes(b"a" * 10)
+    for _ in range(6):
+        _fail(pipe, f, INCOMPLETE)
+    assert pipe._ingest_deferred(f, time.time()) is True
+
+    f.write_bytes(b"a" * 5000)                 # 同步又推进了
+    assert pipe._ingest_deferred(f, time.time()) is False
+    assert f not in pipe._ingest_backoff       # 计数也一并清零
+
+
+def test_success_clears_the_backoff(tmp_path, pipe, monkeypatch):
+    """成功一次之后，下一个同名文件不该继承上次的惩罚。"""
+    f = tmp_path / "ok.m4a"
+    f.write_bytes(b"k" * 10)
+    _fail(pipe, f, INCOMPLETE)
+    assert f in pipe._ingest_backoff
+
+    monkeypatch.setattr(pipe.scanner, "scan", lambda: [])
+    pipe._ingest_backoff.pop(f, None)          # ingest_new_audio 成功分支所做的事
+    assert pipe._ingest_deferred(f, time.time()) is False
+
+
+def test_missing_file_signature_does_not_crash(tmp_path, pipe):
+    """文件在两轮之间被删掉（Syncthing 撤回）也不能炸。"""
+    f = tmp_path / "gone.m4a"
+    f.write_bytes(b"g" * 10)
+    _fail(pipe, f, INCOMPLETE)
+    f.unlink()
+    assert pipe._ingest_deferred(f, time.time()) is False

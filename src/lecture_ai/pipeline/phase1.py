@@ -51,7 +51,18 @@ STEP_TRANSCRIBE = "transcribe"
 # ingest 失败后的重试退避（秒）。ingest 失败不建 session，没有任何状态记住
 # 这个文件失败过，不退避的话 watch 会每个 poll_interval 起两个 ffmpeg 硬撞
 # 同一个文件，直到天荒地老。
+# 分两档，因为这是两种完全不同的失败：
+#
+# - **真错误**（文件损坏、ffmpeg 不见了）：等多久都不会自己好，退到半小时一次，
+#   只为留一条「你回来看一眼」的日志。
+# - **还没写完**（见 _INCOMPLETE_MARKERS）：是会自己好的暂态，而且重试成本极低
+#   —— ffprobe 找不到 moov 会立刻失败，根本不解码。封顶必须小。
+#
+# 2026-09-08 的教训：这两档一开始是合并的，一律顶到 1800 秒。当天上午那节课在
+# 11:56–12:26 之间同步完成，却因为退避窗口一直等到 12:26 才被发现，白等了半小时
+# —— 比转录本身（46 分钟）的一半还多。
 _INGEST_BACKOFF_SEC = [30, 60, 120, 300, 600, 1800]
+_INCOMPLETE_BACKOFF_SEC = [15, 30, 60]
 
 # 「还在录 / 还没同步完」的特征：m4a 的 moov atom 写在文件末尾，录音机没收尾
 # 就没有它。这不是错误，是预期状态，日志降到 info，别刷屏。
@@ -78,7 +89,9 @@ class Phase1Pipeline:
         self.scanner = AudioScanner(config, self.db, one_shot=one_shot)
         self._transcriber = None  # 懒加载并在多个 session 间复用，避免反复加载模型
         # path -> (失败次数, 下次可重试的时间戳)。只在进程内存活，重启即清空。
-        self._ingest_backoff: dict[Path, tuple[int, float]] = {}
+        # path -> (失败次数, 下次可重试的时间戳, 上次看到的 (size, mtime))
+        # 只在进程内存活，重启即清空。
+        self._ingest_backoff: dict[Path, tuple[int, float, tuple[int, float] | None]] = {}
 
     # ------------------------------------------------------------------ ingest
 
@@ -101,18 +114,41 @@ class Phase1Pipeline:
                 self._ingest_backoff.pop(item.path, None)
         return created
 
+    @staticmethod
+    def _file_signature(path: Path) -> tuple[int, float] | None:
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        return (st.st_size, st.st_mtime)
+
     def _ingest_deferred(self, path: Path, now: float) -> bool:
-        """这个文件还在退避窗口里就跳过，避免每轮都去起 ffmpeg 硬撞。"""
+        """这个文件还在退避窗口里就跳过，避免每轮都去起 ffmpeg 硬撞。
+
+        但只要文件本身变过（Syncthing 又写进来一截），就立刻清空退避重新试 ——
+        「变了」是进展的证据，没有理由继续罚站。
+        """
         entry = self._ingest_backoff.get(path)
-        return entry is not None and now < entry[1]
+        if entry is None:
+            return False
+        _fails, next_at, signature = entry
+        if self._file_signature(path) != signature:
+            del self._ingest_backoff[path]
+            return False
+        return now < next_at
 
     def _note_ingest_failure(self, path: Path, exc: LectureAIError) -> None:
-        fails = self._ingest_backoff.get(path, (0, 0.0))[0] + 1
-        delay = _INGEST_BACKOFF_SEC[min(fails, len(_INGEST_BACKOFF_SEC)) - 1]
-        self._ingest_backoff[path] = (fails, time.time() + delay)
-
         text = str(exc)
-        if any(m in text for m in _INCOMPLETE_MARKERS):
+        incomplete = any(m in text for m in _INCOMPLETE_MARKERS)
+        table = _INCOMPLETE_BACKOFF_SEC if incomplete else _INGEST_BACKOFF_SEC
+
+        fails = self._ingest_backoff.get(path, (0, 0.0, None))[0] + 1
+        delay = table[min(fails, len(table)) - 1]
+        self._ingest_backoff[path] = (
+            fails, time.time() + delay, self._file_signature(path),
+        )
+
+        if incomplete:
             # 录音还没收尾，等就是了。不刷 ERROR，也不打整段 ffmpeg 输出。
             log.info("%s 尚未写完（第 %d 次），%d 秒后再试", path.name, fails, delay)
         else:
