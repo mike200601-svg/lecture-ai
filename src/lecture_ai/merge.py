@@ -351,4 +351,134 @@ def _make_silence(tools, target: Path, seconds: float, config: Config) -> bool:
     ])
 
 
-__all__ = ["SessionMerger", "MergeOutcome", "MergePart", "MIN_GAP_SEC", "MAX_GAP_SEC"]
+# --------------------------------------------------------------------- 自动合并
+
+
+def _slot_of(course, when: datetime, tolerance_min: int):
+    """这个时刻落在该课程的哪个课表时段里。匹配不到返回 None。
+
+    用「同一个时段」而不是「同一门课同一天」来分组，是因为一门课一天可能上两次
+    （大数据周三 14:00，如果哪天再加一节晚课，两节课之间也可能只隔十几分钟）。
+    按时段分组才不会把两节独立的课并成一节。
+    """
+    for slot in course.schedule:
+        if slot.contains(when, tolerance_min):
+            return slot
+    return None
+
+
+@dataclass
+class MergeGroup:
+    """一组判定为「同一节课的多段录音」的 session。"""
+
+    session_ids: list[str]
+    reason: str
+
+
+class AutoMerger:
+    """在 watch 里自动发现并合并被切断的录音。
+
+    自动化比手动严格得多 —— 手动合并有人在看着，自动合并没有，所以宁可漏合
+    让人事后补一句 ``lecture-ai merge``，也不能错合把两节不相干的课搅在一起。
+    收紧的地方：
+
+    - 间隔上限从 40 分钟降到 ``auto_merge_max_gap_minutes``（默认 15 分钟）；
+    - 必须落在**同一个课表时段**里。匹配不到课表的（unknown 课程）只在间隔
+      极小时才合，因为那时无法用课表证明它们属于同一节课。
+    """
+
+    #: 匹配不到课表时，只有间隔小于这个值才敢自动合并。
+    #: 录音机断一次再开，通常几十秒到几分钟；超过 5 分钟就可能是两回事了。
+    UNSCHEDULED_MAX_GAP_SEC = 300.0
+
+    def __init__(self, config: Config, db: Database | None = None) -> None:
+        self.config = config
+        self.db = db or Database(config.paths.database)
+        self.merger = SessionMerger(config, self.db)
+        self.sessions = self.merger.sessions
+
+    def find_groups(self) -> list[MergeGroup]:
+        """扫出所有「应该合并」的组。只读，不改任何东西。"""
+        from lecture_ai.session import load_courses
+
+        courses = load_courses(self.config.courses_path, self.config.course.default_course_key)
+        tolerance = self.config.course.match_tolerance_minutes
+        max_gap = self.config.processing.auto_merge_max_gap_minutes * 60.0
+
+        candidates = []
+        for session_id in self.sessions.list_ids():
+            try:
+                meta = self.sessions.load(session_id)
+            except LectureAIError:
+                continue
+            if meta.merged_into or meta.state not in MERGEABLE_STATES or not meta.start_time:
+                continue
+            candidates.append(meta)
+
+        # 按 (日期, 课程, 所属课表时段) 分桶。时段是 None 时单独成桶，
+        # 后面用更严的间隔规则处理。
+        buckets: dict[tuple, list[SessionMeta]] = {}
+        for meta in candidates:
+            course = courses.get(meta.course.key)
+            slot = _slot_of(course, _start_of(meta), tolerance)
+            key = (meta.date, meta.course.key,
+                   (slot.weekday, slot.start, slot.end) if slot else None)
+            buckets.setdefault(key, []).append(meta)
+
+        groups: list[MergeGroup] = []
+        for (date, course_key, slot_key), metas in buckets.items():
+            if len(metas) < 2:
+                continue
+            metas.sort(key=_start_of)
+            limit = max_gap if slot_key else self.UNSCHEDULED_MAX_GAP_SEC
+
+            # 在桶内再按间隔切链：只有连续相邻的几段才算同一节课
+            chain: list[SessionMeta] = [metas[0]]
+            for prev, cur in zip(metas, metas[1:]):
+                end = _start_of(prev) + timedelta(seconds=prev.audio.duration_sec or 0.0)
+                gap = (_start_of(cur) - end).total_seconds()
+                if 0 <= gap <= limit:
+                    chain.append(cur)
+                    continue
+                if len(chain) >= 2:
+                    groups.append(_describe(chain, slot_key, date, course_key))
+                chain = [cur]
+            if len(chain) >= 2:
+                groups.append(_describe(chain, slot_key, date, course_key))
+
+        return groups
+
+    def run_once(self) -> list[MergeOutcome]:
+        """watch 每轮调用。没有可合并的就什么都不做。"""
+        if not self.config.processing.auto_merge:
+            return []
+
+        outcomes = []
+        for group in self.find_groups():
+            try:
+                outcome = self.merger.merge(group.session_ids)
+            except LectureAIError as exc:
+                # 合不了就留给人工，绝不能打断 watch
+                log.warning("自动合并跳过 %s：%s", "、".join(group.session_ids), exc)
+                continue
+            except Exception:
+                log.exception("自动合并发生未预期错误：%s", group.session_ids)
+                continue
+            log.info("自动合并（%s）：%s", group.reason, outcome.message)
+            outcomes.append(outcome)
+        return outcomes
+
+
+def _describe(chain: list[SessionMeta], slot_key, date: str, course_key: str) -> MergeGroup:
+    if slot_key:
+        when = f"{slot_key[1].strftime('%H:%M')}–{slot_key[2].strftime('%H:%M')}"
+        reason = f"{date} {course_key} 的 {when} 这一节，共 {len(chain)} 段"
+    else:
+        reason = f"{date} {course_key} 未匹配课表，但相邻且间隔极小，共 {len(chain)} 段"
+    return MergeGroup(session_ids=[m.session_id for m in chain], reason=reason)
+
+
+__all__ = [
+    "SessionMerger", "AutoMerger", "MergeOutcome", "MergePart", "MergeGroup",
+    "MIN_GAP_SEC", "MAX_GAP_SEC",
+]

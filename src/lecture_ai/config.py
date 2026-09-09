@@ -103,6 +103,15 @@ class ProcessingConfig:
     # 关掉任意一个都会退回手动 `lecture-ai repair` / `export-package`。
     auto_repair: bool = True
     auto_export_package: bool = True
+    # 录音中途断开会让一节课变成几个 session。开启后 watch 会在转录完成、
+    # repair 之前把它们自动并回一节。判定见 lecture_ai/merge.py 的 AutoMerger：
+    # 必须同一天、同一门课、落在**同一个课表时段**里，且间隔不超过下面这个值。
+    auto_merge: bool = True
+    auto_merge_max_gap_minutes: int = 15
+    # 一节课的最后一段录音可能比前一段晚几十分钟才同步过来（手机传 100+ MB 要时间）。
+    # 在课表时段结束后的这段宽限期内，先不对该节课做 repair / 出包，
+    # 免得先给半节课出一份，等另一半到了再推翻重来。
+    merge_grace_minutes: int = 30
 
 
 @dataclass

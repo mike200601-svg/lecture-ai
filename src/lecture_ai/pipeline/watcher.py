@@ -130,11 +130,17 @@ class Watcher:
         pipeline: Phase1Pipeline | None = None,
         web_batches: CleanWebBatchService | None = None,
         autopilot: AutopilotService | None = None,
+        auto_merger: "AutoMerger | None" = None,
     ) -> None:
         self.config = config
         self.pipeline = pipeline or Phase1Pipeline(config)
         self.web_batches = web_batches or CleanWebBatchService(config)
         self.autopilot = autopilot or AutopilotService(config)
+        if auto_merger is None:
+            from lecture_ai.merge import AutoMerger
+
+            auto_merger = AutoMerger(config)
+        self.auto_merger = auto_merger
         self._stop = False
 
     def request_stop(self, *_args) -> None:
@@ -166,6 +172,11 @@ class Watcher:
                             log.info("✔ %s 处理完成（%s）", o.session_id, o.message)
                         else:
                             log.error("✘ %s 处理失败：%s", o.session_id, o.message)
+                    # 必须在 autopilot 之前：先把断开的录音并回一节课，
+                    # 再去 repair / 出包，否则会先给半节课出一份再推翻重来。
+                    for merged in self.auto_merger.run_once():
+                        log.info("✔ %s 自动合并：%s", merged.primary_id, merged.message)
+
                     # Phase 1 收尾：自动补 repair 并出投喂包
                     for step in self.autopilot.run_once():
                         if step.ok:

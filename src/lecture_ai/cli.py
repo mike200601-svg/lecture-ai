@@ -46,11 +46,31 @@ def _force_utf8_stdout() -> None:
 
 
 def out(msg: str = "") -> None:
-    """面向用户的输出。日志走 logging，这里只负责命令行结果展示。"""
+    """面向用户的输出。日志走 logging，这里只负责命令行结果展示。
+
+    pythonw.exe 下 ``sys.stdout`` 是 None，一 print 就 AttributeError。
+    长驻命令（watch / serve）挂计划任务时正是用 pythonw 跑的 —— 没有控制台
+    才不会在桌面上留一个黑窗口。所以这里必须容忍"根本没有 stdout"，
+    否则任务启动即以退出码 1 死掉，而且因为没有控制台，错误无处可见。
+    """
+    if sys.stdout is None:
+        return
     try:
         print(msg)
     except UnicodeEncodeError:  # 极端情况下的兜底，不让编码问题掀翻命令
         sys.stdout.write(msg.encode("utf-8", "replace").decode("utf-8", "replace") + "\n")
+    except (AttributeError, ValueError, OSError):
+        pass    # stdout 被关闭或不可写，同样不该影响命令本身
+
+
+def flush_stdout() -> None:
+    """把缓冲区刷出去。没有 stdout（pythonw）或它已关闭时安静返回。"""
+    if sys.stdout is None:
+        return
+    try:
+        sys.stdout.flush()
+    except (AttributeError, ValueError, OSError):
+        pass
 
 
 def _width(text: str) -> int:
@@ -829,7 +849,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     out("  Ctrl+C 停止")
     # 服务器会一直跑；输出被重定向时 stdout 是块缓冲的，不 flush 的话
     # 上面这几行（含访问地址）会一直卡在缓冲区里看不见。
-    sys.stdout.flush()
+    # pythonw.exe 下没有 stdout —— 挂计划任务时正是这么跑的，见 out()。
+    flush_stdout()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

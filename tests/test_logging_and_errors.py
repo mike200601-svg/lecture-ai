@@ -98,3 +98,38 @@ def test_detach_removes_handler(tmp_path):
     assert len(logging.getLogger("lecture_ai").handlers) == before + 1
     detach_session_log(handler)
     assert len(logging.getLogger("lecture_ai").handlers) == before
+
+
+# ------------------------------------------------------- pythonw 下没有 stdout
+
+# watch / serve 挂计划任务时用 pythonw.exe 跑（没有控制台才不会在桌面上留黑窗口），
+# 那时 sys.stdout 和 sys.stderr 都是 None。任何直接碰它们的代码都会让任务
+# 以退出码 1 静默死掉 —— 而且因为没有控制台，错误无处可见。
+# 2026-09-09 面板任务就这样连挂两次，第一次在 out()，第二次在 cmd_serve 的 flush。
+
+
+def test_out_survives_without_stdout(monkeypatch):
+    from lecture_ai.cli import out
+
+    monkeypatch.setattr("sys.stdout", None)
+    out("这行没地方可去，但不该抛异常")
+
+
+def test_flush_stdout_survives_without_stdout(monkeypatch):
+    from lecture_ai.cli import flush_stdout
+
+    monkeypatch.setattr("sys.stdout", None)
+    flush_stdout()
+
+
+def test_out_survives_a_closed_stdout(monkeypatch):
+    """stdout 被关掉（管道对端先退出）时同样不能掀翻命令。"""
+    import io
+
+    from lecture_ai.cli import flush_stdout, out
+
+    closed = io.StringIO()
+    closed.close()
+    monkeypatch.setattr("sys.stdout", closed)
+    out("写不进去")
+    flush_stdout()

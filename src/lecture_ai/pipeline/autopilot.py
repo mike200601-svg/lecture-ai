@@ -84,6 +84,8 @@ class AutopilotService:
             if meta.merged_into:
                 # 内容已经在主 session 里了，再 repair / 出包就是重复产出
                 continue
+            if self._waiting_for_siblings(meta):
+                continue
 
             session_dir = self.sessions.session_dir(session_id)
             if processing.auto_repair and not (
@@ -96,6 +98,45 @@ class AutopilotService:
                 if outcome is not None:
                     results.append(outcome)
         return results
+
+    def _waiting_for_siblings(self, meta, now=None) -> bool:
+        """这节课可能还有一段录音没同步过来，先别急着出稿。
+
+        录音中途断开时，后一段往往要晚几十分钟才传完（100+ MB）。不等的话
+        会先给半节课出一份投喂包，等另一半到了、自动合并完，又得推翻重来 ——
+        桌面上先冒出一个半截的包再消失，比晚半小时拿到完整的包更让人困惑。
+
+        只在「课表时段刚结束不久」这段窗口里等。匹配不到课表就不等 ——
+        没有依据说明还有下一段。
+        """
+        grace = getattr(self.config.processing, "merge_grace_minutes", 0)
+        if grace <= 0 or not meta.start_time:
+            return False
+
+        from datetime import datetime, timedelta
+
+        from lecture_ai.merge import _slot_of
+        from lecture_ai.session import load_courses
+
+        try:
+            start = datetime.fromisoformat(str(meta.start_time))
+            start = start.replace(tzinfo=None) if start.tzinfo else start
+        except ValueError:
+            return False
+
+        courses = load_courses(self.config.courses_path, self.config.course.default_course_key)
+        slot = _slot_of(
+            courses.get(meta.course.key), start, self.config.course.match_tolerance_minutes
+        )
+        if slot is None:
+            return False
+
+        deadline = datetime.combine(start.date(), slot.end) + timedelta(minutes=grace)
+        if (now or datetime.now()) >= deadline:
+            return False
+        log.debug("%s 处于合并宽限期内（到 %s），暂不 repair/出包",
+                  meta.session_id, deadline.strftime("%H:%M"))
+        return True
 
     # ------------------------------------------------------------------ 单步
     def _repair(self, session_id: str) -> AutopilotOutcome:
