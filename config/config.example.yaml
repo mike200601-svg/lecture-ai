@@ -78,6 +78,21 @@ processing:
   min_audio_seconds: 60                     # 短于此时长的音频不建 session（防误触录音）
   auto_repair: true                         # 转录完成后自动跑 selective repair
   auto_export_package: true                 # 有 REPAIRED 后自动生成 GPT Web 投喂包
+  # 录音中途断开会让一节课变成几个 session。开启后 watch 会在转录完成、repair 之前
+  # 自动并回一节：必须同一天、同一门课、落在同一个课表时段里，且间隔不超过下面这个值。
+  auto_merge: true
+  auto_merge_max_gap_minutes: 15
+  # 一节课的最后一段可能比前一段晚几十分钟才同步过来（手机传 100+ MB 要时间）。
+  # 课表时段结束后的这段宽限期内先不 repair / 出包，免得先给半节课出一份再推翻重来。
+  merge_grace_minutes: 30
+
+# ---------------------------------------------------------------- 面板健康监控
+monitoring:
+  # Syncthing 的 home 目录（里面有 config.xml）。留空则自动探测常见位置。
+  # 手动拷贝录音的人不需要它，探测不到只会在面板上显示「未配置」。
+  syncthing_home: ""
+  # 距上一次收到新录音超过这么多小时就在面板上告警。没课的日子请忽略该提示。
+  sync_stale_hours: 6.0
 
 # ---------------------------------------------------------------- Phase 1.5 选择性重转录
 repair:
