@@ -150,6 +150,12 @@ class SessionMeta:
     audio: AudioInfo = field(default_factory=AudioInfo)
     images: list[dict[str, Any]] = field(default_factory=list)  # Phase 3
     steps: dict[str, StepStatus] = field(default_factory=dict)
+    #: 录音中途断过时，一节课会被切成几个 session。合并后：
+    #: 主 session 用 merged_from 记住并进来的那几个；被并掉的用 merged_into
+    #: 指回主 session，并从此被 autopilot、面板、出稿全部跳过 —— 它的内容
+    #: 已经在主 session 里了，再处理一遍就是重复产出。详见 lecture_ai/merge.py。
+    merged_from: list[str] = field(default_factory=list)
+    merged_into: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     schema_version: int = METADATA_SCHEMA_VERSION
@@ -176,6 +182,8 @@ class SessionMeta:
             "audio": self.audio.to_dict(),
             "images": self.images,
             "steps": {k: v.to_dict() for k, v in self.steps.items()},
+            "merged_from": self.merged_from,
+            "merged_into": self.merged_into,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -197,6 +205,8 @@ class SessionMeta:
             audio=AudioInfo.from_dict(data.get("audio")),
             images=data.get("images", []) or [],
             steps={k: StepStatus.from_dict(v) for k, v in (data.get("steps") or {}).items()},
+            merged_from=list(data.get("merged_from") or []),
+            merged_into=data.get("merged_into"),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             schema_version=int(data.get("schema_version", METADATA_SCHEMA_VERSION)),

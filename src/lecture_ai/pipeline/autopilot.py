@@ -81,6 +81,9 @@ class AutopilotService:
                 continue
             if meta.state not in ELIGIBLE_STATES:
                 continue
+            if meta.merged_into:
+                # 内容已经在主 session 里了，再 repair / 出包就是重复产出
+                continue
 
             session_dir = self.sessions.session_dir(session_id)
             if processing.auto_repair and not (

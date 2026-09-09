@@ -118,6 +118,8 @@ class AppState:
             "has_repaired": (session_dir / "transcript" / REPAIRED_MD).is_file(),
             "has_note": note_path.is_file(),
             "note_name": note_path.name,
+            "merged_into": meta.merged_into,
+            "merged_from": meta.merged_from,
             "steps": {name: status.status for name, status in meta.steps.items()},
         }
 

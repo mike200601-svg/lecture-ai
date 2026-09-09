@@ -466,6 +466,43 @@ def cmd_retry(args: argparse.Namespace) -> int:
     return EXIT_FAILURE
 
 
+def cmd_merge(args: argparse.Namespace) -> int:
+    """把中途断开、被切成几段的同一节课合并回一个 session。
+
+    合并发生在转录之后 —— 已经跑完的 ASR 一律留住，只重排时间轴。
+    """
+    from lecture_ai.merge import SessionMerger
+    from lecture_ai.utils.timefmt import hhmmss
+
+    config = _bootstrap(args)
+    merger = SessionMerger(config)
+
+    parts = merger.plan(args.session_ids, allow_any_course=args.allow_any_course)
+    out(f"将并入主 session：{parts[0].meta.session_id}（{parts[0].meta.course.name}）")
+    for index, part in enumerate(parts):
+        mark = "主" if index == 0 else "并入"
+        gap = f"，前面留 {hhmmss(part.gap_before_sec)} 静音" if part.gap_before_sec else ""
+        out(f"  [{mark}] {part.meta.session_id}"
+            f"  偏移 {hhmmss(part.offset_sec)}"
+            f"  {len(part.segments)} 片段{gap}")
+
+    if args.dry_run:
+        out("\n（--dry-run，未做任何改动）")
+        return EXIT_OK
+
+    outcome = merger.merge(
+        args.session_ids,
+        allow_any_course=args.allow_any_course,
+        keep_audio=not args.no_audio,
+    )
+    out(f"\n✔ {outcome.primary_id}：{outcome.message}")
+    if not outcome.audio_merged:
+        out("⚠ 音频未合并，repair 会按错误的时间轴回到音频里取样，建议先别跑 repair。")
+    out(f"  已并入并停用：{'、'.join(outcome.merged_ids)}")
+    out("  旧的 REPAIRED 与 analysis 产物已删除，watch 会在合并后的整段上重新生成。")
+    return EXIT_OK
+
+
 def cmd_relabel(args: argparse.Namespace) -> int:
     """把 session 目录改名成能认出是哪节课的名字。
 
@@ -989,6 +1026,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_relabel.add_argument("--to", help="指定新名字，默认按 metadata 推导")
     p_relabel.add_argument("--dry-run", action="store_true", help="只显示将要改成什么")
     p_relabel.set_defaults(func=cmd_relabel)
+
+    p_merge = sub.add_parser(
+        "merge", help="把一节课被切成几段的录音合并成一个 session"
+    )
+    p_merge.add_argument("session_ids", nargs="+", metavar="SESSION_ID",
+                         help="要合并的 session（顺序随意，按起始时间自动排序）")
+    p_merge.add_argument("--dry-run", action="store_true",
+                         help="只显示会怎么合，不动任何文件")
+    p_merge.add_argument("--allow-any-course", action="store_true",
+                         help="允许合并不同课程的 session（默认拒绝）")
+    p_merge.add_argument("--no-audio", action="store_true",
+                         help="只合并转录，不拼音频（那样 repair 会失效）")
+    p_merge.set_defaults(func=cmd_merge)
 
     p_export_package = sub.add_parser(
         "export-package", help="整理一节课的 REPAIRED、板书和课件供 GPT Web 上传"
