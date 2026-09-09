@@ -89,6 +89,25 @@
     color: var(--muted); margin-top: 10px;
   }
   details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+
+  /* ---- 健康告警：一切正常时整块不出现，出现即代表要人管 ---- */
+  .alert {
+    border: 1px solid; border-radius: 6px; padding: 9px 12px; margin-bottom: 8px;
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
+    background: color-mix(in srgb, currentColor 9%, transparent);
+  }
+  .alert.error { color: var(--err); }
+  .alert.warn { color: var(--warn); }
+  .alert b { font-weight: 600; }
+  .alert .hint {
+    display: block; margin-top: 3px; color: var(--muted);
+    font-size: 12px; line-height: 1.5;
+  }
+  .alert code {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 1px 5px; font-size: 11.5px;
+  }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -205,6 +224,37 @@ function jobHtml(j) {
   return '<div class="job">' + inner + "</div>";
 }
 
+// 告警区。一切正常时返回空串 —— 这块不出现本身就是"没事"的信号。
+function alertsHtml(health) {
+  const list = (health && health.alerts) || [];
+  return list.map((a) =>
+    '<div class="alert ' + (a.level === "error" ? "error" : "warn") + '">' +
+    "<b>" + esc(a.text) + "</b>" +
+    (a.hint ? '<span class="hint">' + esc(a.hint).replace(/`([^`]+)`/g, "<code>$1</code>") + "</span>" : "") +
+    "</div>"
+  ).join("");
+}
+
+// 一行事实：开机多久、手机什么时候连上的、最近一个录音多新。
+function factsHtml(health) {
+  if (!health) return "";
+  const bits = [];
+  const m = health.machine || {};
+  if (m.available && m.uptime_sec != null) {
+    bits.push("开机 " + hms(m.uptime_sec) + (m.crash_count_30d ? " · 30 天内异常关机 " + m.crash_count_30d + " 次" : ""));
+  }
+  for (const d of (health.sync && health.sync.devices) || []) {
+    bits.push(esc(d.name) + "：" + (d.connected ? "已连接" : "断开"));
+  }
+  const inc = health.incoming || {};
+  if (inc.available && inc.latest_name) {
+    bits.push("最近录音 " + ago(inc.age_hours * 3600));
+  }
+  if (!bits.length) return "";
+  return '<div class="facts" style="margin-bottom:10px">' +
+         bits.map((b) => "<span>" + b + "</span>").join("") + "</div>";
+}
+
 async function loadStatus() {
   const box = $("statusbody");
   let s;
@@ -216,7 +266,8 @@ async function loadStatus() {
   }
 
   const w = s.watch || {};
-  let html = '<div class="row" style="margin-bottom:10px">';
+  let html = alertsHtml(s.health) + factsHtml(s.health);
+  html += '<div class="row" style="margin-bottom:10px">';
   if (w.running) {
     html += '<span><span class="dot live"></span>watch 运行中' +
             (w.pid ? '<span class="muted"> · PID ' + w.pid + "</span>" : "") +
@@ -229,9 +280,9 @@ async function loadStatus() {
   }
   html += "</div>";
 
-  if (!w.running) {
-    html += '<p class="muted">启动它：<code>python -m lecture_ai watch</code>' +
-            (w.stale_lock ? "（锁文件是上次残留的，重启会自动接管）" : "") + "</p>";
+  // 启动命令已经在上面的告警里给过了，这里不重复，只补锁文件这一条附加信息
+  if (!w.running && w.stale_lock) {
+    html += '<p class="muted">锁文件是上次残留的，重启 watch 会自动接管。</p>';
   }
 
   if (s.transcribing && s.transcribing.length) {

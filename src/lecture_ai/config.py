@@ -106,6 +106,17 @@ class ProcessingConfig:
 
 
 @dataclass
+class MonitoringConfig:
+    """面板的健康监控。全部是旁路信息，配错了最多少显示一块，不影响流水线。"""
+
+    #: Syncthing 的 home 目录（里面有 config.xml）。留空则自动探测常见位置。
+    #: 手动拷贝录音的人不需要它，探测不到只会显示「未配置」。
+    syncthing_home: str = ""
+    #: 距上一次收到新录音超过这么多小时就告警。没课的日子请忽略该提示。
+    sync_stale_hours: float = 6.0
+
+
+@dataclass
 class RepairConfig:
     """Phase 1.5 选择性重转录。阈值均可由 config.yaml 调整。"""
 
@@ -197,6 +208,7 @@ class Config:
     transcription: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
+    monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     repair: RepairConfig = field(default_factory=RepairConfig)
     clean: CleanConfig = field(default_factory=CleanConfig)
     course: CourseMatchConfig = field(default_factory=CourseMatchConfig)
@@ -358,6 +370,7 @@ def load_config(config_path: Path | None = None, project_root: Path | None = Non
         transcription=transcription,
         audio=audio,
         processing=_dc(ProcessingConfig, _sub(raw, "processing")),
+        monitoring=_dc(MonitoringConfig, _sub(raw, "monitoring")),
         repair=_dc(RepairConfig, _sub(raw, "repair")),
         clean=_dc(CleanConfig, _sub(raw, "clean")),
         course=_dc(CourseMatchConfig, _sub(raw, "course")),

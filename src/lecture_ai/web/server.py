@@ -33,6 +33,7 @@ from urllib.parse import unquote, urlparse
 from lecture_ai.config import Config
 from lecture_ai.database import Database
 from lecture_ai.errors import LectureAIError
+from lecture_ai.health import snapshot as health_snapshot
 from lecture_ai.pipeline.progress import read_progress
 from lecture_ai.repair import REPAIRED_MD
 from lecture_ai.session import SessionManager, SessionState
@@ -173,10 +174,12 @@ class AppState:
             elif meta.state == SessionState.AUDIO_READY:
                 waiting.append(row)
 
+        watch = watch_status(self.config)
         return {
-            "watch": watch_status(self.config),
+            "watch": watch,
             "transcribing": transcribing,
             "waiting": waiting,
+            "health": health_snapshot(self.config, watch),
             "log_tail": self.log_tail(),
         }
 
