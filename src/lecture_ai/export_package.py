@@ -49,6 +49,18 @@ class ExportPackageBuilder:
         self.config = config
         self.db = db or Database(config.paths.database)
         self.sessions = SessionManager(config, self.db)
+        self._courses = None
+
+    @property
+    def courses(self):
+        """课程表懒加载 —— 只有渲染术语表时才需要。"""
+        if self._courses is None:
+            from lecture_ai.session import load_courses
+
+            self._courses = load_courses(
+                self.config.courses_path, self.config.course.default_course_key
+            )
+        return self._courses
 
     def build(
         self,
@@ -367,7 +379,47 @@ class ExportPackageBuilder:
             .replace("{{FINAL_NOTE_FILE}}", final_note_name)
             .replace("{{BOARD_COUNT}}", str(len(board)))
             .replace("{{SLIDE_COUNT}}", str(len(slides)))
+            .replace("{{GLOSSARY}}", self._render_glossary(meta))
         )
+
+    def _render_glossary(self, meta: SessionMeta) -> str:
+        """把本课术语表渲染进投喂 prompt。
+
+        这是本地 ASR 与 GPT 之间唯一的领域知识通道，而它一度是断的：
+        ingest 时系统已经按课表认出这是哪门课、也把词表读进了内存，但
+        ASR 侧 hotwords 被实录 A/B 关掉了（长词表会在弱语音处诱发幻觉），
+        投喂包这边又从来没把词表交出去。结果 65 条术语读进内存后谁都没用上，
+        GPT 拿到「邪神方程」却没有任何依据知道那是「薛定谔方程」。
+
+        2026-09-09 量子力学一节实测：65 条术语只在转录里命中 2 条（3%）。
+        """
+        from lecture_ai.transcription import load_glossary
+
+        course = self.courses.get(meta.course.key)
+        glossary = load_glossary(
+            self.config.glossary_dir, course.glossary, include_common=True
+        )
+        if not glossary.terms:
+            return ("（本课暂无术语表。若转录中的专业名词反复出错，"
+                    "可在 config/glossary/ 下补一份。）")
+
+        lines = [
+            "以下是本课的标准术语写法。**转录来自本地语音识别，专业名词的近音错字很常见**"
+            "（实测「薛定谔方程」曾被写成「邪神方程」、「洛伦兹变换」写成「罗仁茨的变幻」）。",
+            "",
+            "请按下面的清单订正转录中的对应错写，并在成稿中统一使用这里的写法：",
+            "",
+        ]
+        lines += [f"- {term}" for term in glossary.terms]
+        lines += [
+            "",
+            "订正原则：",
+            "",
+            "- 只订正**读音相近且语境吻合**的错写，不要凭空把没讲过的术语塞进笔记；",
+            "- 清单之外的专业名词若明显是同类错写，可一并订正，但要在文末「仍需确认」里列出；",
+            "- 无法判断时保留转录原文并标注，不要猜。",
+        ]
+        return "\n".join(lines)
 
     def _render_session_info(
         self,

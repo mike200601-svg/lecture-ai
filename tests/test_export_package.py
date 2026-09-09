@@ -25,6 +25,13 @@ def _create_session(config, db, *, repaired: bool = True):
     return manager, meta
 
 
+def _prompt_of(outcome):
+    """从产出目录里取回 NOTE_PROMPT 的内容。"""
+    hits = list(outcome.output_dir.glob("*_NOTE_PROMPT.md"))
+    assert len(hits) == 1, f"应当只有一个 NOTE_PROMPT，实际 {hits}"
+    return hits[0].read_text(encoding="utf-8")
+
+
 def test_repaired_is_required_without_raw_fallback(config, db):
     manager, meta = _create_session(config, db, repaired=False)
     raw = manager.session_dir(meta.session_id) / "transcript" / "transcript_raw.md"
@@ -144,3 +151,59 @@ def test_old_session_directory_name_still_exports(config, db):
     assert outcome.session_id == old_id
     assert outcome.output_dir.name == "2026-09-03_1400_量子力学_001"
     assert outcome.manifest_path.is_file()
+
+
+# ----------------------------------------------------------------- 术语表
+
+# 本地 ASR 与 GPT 之间唯一的领域知识通道。它一度是断的：ingest 已经按课表认出
+# 是哪门课、也把词表读进了内存，但 ASR 侧 hotwords 被实录 A/B 关掉，投喂包这边
+# 又从来没把词表交出去 —— 65 条术语读进内存后谁都没用上。
+# 2026-09-09 量子力学实测：术语只在转录里命中 2 条（3%）。
+
+
+def test_prompt_carries_the_course_glossary(config, db):
+    """投喂包必须把本课术语表交给 GPT，否则它没有依据订正近音错字。"""
+    manager, meta = _create_session(config, db)
+    prompt = _prompt_of(ExportPackageBuilder(config, db).build(meta.session_id))
+    assert "## 本课术语表" in prompt
+    # 词表里的词必须真的出现在 prompt 里
+    terms = [
+        line.strip()
+        for line in (config.glossary_dir / "quantum_mechanics.txt").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert terms, "测试夹具的术语表不该是空的"
+    for term in terms[:5]:
+        assert term in prompt, f"术语 {term} 没有出现在投喂 prompt 里"
+
+
+def test_prompt_tells_gpt_to_fix_homophone_errors(config, db):
+    """光给词表不够，还要说清楚为什么给 —— 否则 GPT 不会主动去订正。"""
+    manager, meta = _create_session(config, db)
+    prompt = _prompt_of(ExportPackageBuilder(config, db).build(meta.session_id))
+    assert "近音" in prompt
+    assert "订正" in prompt
+    # 不能变成"随便改"：必须保留"无法判断时不要猜"的约束
+    assert "不要猜" in prompt
+
+
+def test_prompt_asks_for_simplified_output(config, db):
+    """转录简繁混杂是 ASR 产物，成稿该统一 —— 交给 GPT 做比本地转换省事且更准。"""
+    manager, meta = _create_session(config, db)
+    prompt = _prompt_of(ExportPackageBuilder(config, db).build(meta.session_id))
+    assert "简体" in prompt
+
+
+def test_missing_glossary_does_not_break_the_package(config, db, monkeypatch):
+    """没有词表的课（unknown）照样要能出包，只是少一段。"""
+    manager, meta = _create_session(config, db)
+    monkeypatch.setattr(
+        "lecture_ai.transcription.load_glossary",
+        lambda *a, **k: type("G", (), {"terms": [], "sources": []})(),
+    )
+    outcome = ExportPackageBuilder(config, db).build(meta.session_id)
+    prompt = _prompt_of(outcome)
+    assert outcome.output_dir
+    assert "暂无术语表" in prompt
